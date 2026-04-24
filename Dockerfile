@@ -3,7 +3,11 @@
 #############################
 # Stage 1: Builder
 #############################
-FROM --platform=linux/arm64 golang:1.26-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
+
+# buildx 会注入 TARGETOS/TARGETARCH，用于构建目标架构二进制。
+ARG TARGETOS
+ARG TARGETARCH
 
 # 构建所需基础工具（git 用于拉取可能的私有依赖）
 RUN apk add --no-cache git ca-certificates
@@ -17,9 +21,10 @@ RUN go mod download
 # 再复制业务代码
 COPY . .
 
-# 为 Linux/ARM64 编译静态二进制，便于在最小镜像运行
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=arm64
-RUN go build -trimpath -ldflags="-s -w" -o /out/orbitterm-server ./main.go
+# 按目标平台编译静态二进制（当前部署目标为 linux/amd64）。
+ENV CGO_ENABLED=0
+RUN GOOS=${TARGETOS:-linux} GOARCH=${TARGETARCH:-amd64} \
+    go build -trimpath -ldflags="-s -w" -o /out/orbitterm-server ./main.go
 
 #############################
 # Stage 2: Runtime

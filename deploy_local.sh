@@ -5,7 +5,7 @@ set -euo pipefail
 # deploy_local.sh
 # 功能：
 # 1) 先执行 Go 编译校验，确保代码可构建；
-# 2) 使用 Docker Buildx 构建 ARM64 镜像；
+# 2) 使用 Docker Buildx 构建 AMD64 镜像；
 # 3) 打上 ghcr.io/<用户名>/orbitterm-server:latest 标签；
 # 4) 交互式询问是否 push 到 GHCR。
 
@@ -39,13 +39,14 @@ if [[ "$GHCR_USER" == "$DEFAULT_GHCR_USER" ]]; then
 fi
 
 IMAGE_TAG="ghcr.io/${GHCR_USER}/orbitterm-server:latest"
+TARGET_PLATFORM="${TARGET_PLATFORM:-linux/amd64}"
 
-echo "[2/4] 构建 Docker 镜像（linux/arm64）..."
+echo "[2/4] 构建 Docker 镜像（${TARGET_PLATFORM}）..."
 # --load: 将 buildx 构建结果加载到本地 Docker images
 # 若你后续希望直接推送多架构镜像，可改为 --push 并配合多平台参数
 
 docker buildx build \
-  --platform linux/arm64 \
+  --platform "${TARGET_PLATFORM}" \
   --tag "$IMAGE_TAG" \
   --load \
   .
