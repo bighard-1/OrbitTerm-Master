@@ -1,0 +1,41 @@
+services:
+  orbit-db:
+    image: postgres:16-alpine
+    container_name: orbit-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: orbitterm
+      POSTGRES_USER: orbitterm
+      POSTGRES_PASSWORD: orbitterm_pass
+      TZ: UTC
+    ports:
+      - "5432:5432"
+    volumes:
+      - orbit_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U orbitterm -d orbitterm"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  orbit-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ghcr.io/your-github-username/orbitterm-server:latest
+    container_name: orbit-api
+    restart: unless-stopped
+    depends_on:
+      orbit-db:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: "8080"
+      DATABASE_URL: "host=orbit-db user=orbitterm password=orbitterm_pass dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"
+      JWT_SECRET: "replace-with-strong-jwt-secret"
+      JWT_ISSUER: "orbitterm-server"
+      JWT_EXPIRE_HOURS: "24"
+    ports:
+      - "8080:8080"
+
+volumes:
+  orbit_db_data:
