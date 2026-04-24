@@ -2,6 +2,11 @@
 
 OrbitTerm 后端基础框架（Go + Gin + Gorm + PostgreSQL + Argon2id + JWT）。
 
+## 部署指南
+
+- 1Panel 容器化部署（含详细步骤、变量示例、升级回滚）：
+  - [docs/DEPLOY_1PANEL.md](docs/DEPLOY_1PANEL.md)
+
 ## 一、项目目录结构（符合 Go 后端常见最佳实践）
 
 ```text
