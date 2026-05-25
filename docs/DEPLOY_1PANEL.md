@@ -76,7 +76,8 @@ services:
       DATABASE_URL: "host=orbit-db user=orbitterm password=ReplaceWithStrongDBPassword dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"
       JWT_SECRET: "ReplaceWithLongRandomJwtSecret"
       JWT_ISSUER: "orbitterm-server"
-      JWT_EXPIRE_HOURS: "24"
+      JWT_ACCESS_EXPIRE_MINUTES: "15"
+      JWT_REFRESH_EXPIRE_DAYS: "30"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -111,9 +112,13 @@ volumes:
    - 示例：`orbitterm-server`
    - 说明：JWT 签发者标识。
 
-5. `JWT_EXPIRE_HOURS`
-   - 示例：`24`
-   - 说明：Token 过期时间（小时）。
+5. `JWT_ACCESS_EXPIRE_MINUTES`
+   - 示例：`15`
+   - 说明：Access Token 过期时间（分钟）。
+
+6. `JWT_REFRESH_EXPIRE_DAYS`
+   - 示例：`30`
+   - 说明：Refresh Token 过期时间（天）。
 
 数据库容器变量（`orbit-db`）：
 
@@ -156,4 +161,3 @@ volumes:
 3. `POST /api/v1/auth/register` 正常。
 4. `POST /api/v1/auth/login` 可返回 JWT。
 5. 带 Bearer Token 调用 `/api/v1/config/upload` 正常。
-

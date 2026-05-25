@@ -52,12 +52,15 @@ OrbitTerm-Server
 - `DATABASE_URL`（默认本地 PostgreSQL 连接）
 - `JWT_SECRET`（默认演示值，生产必须替换）
 - `JWT_ISSUER`（默认 `orbitterm-server`）
-- `JWT_EXPIRE_HOURS`（默认 `24`）
+- `JWT_ACCESS_EXPIRE_MINUTES`（默认 `15`）
+- `JWT_REFRESH_EXPIRE_DAYS`（默认 `30`）
+- `JWT_EXPIRE_HOURS`（兼容旧配置，未设置新变量时回退）
 
 ## 四、接口
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
+- `POST /api/v1/auth/refresh`
 
 ### 注册示例
 

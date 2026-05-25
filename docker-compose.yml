@@ -33,7 +33,8 @@ services:
       DATABASE_URL: "host=orbit-db user=orbitterm password=orbitterm_pass dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"
       JWT_SECRET: "replace-with-strong-jwt-secret"
       JWT_ISSUER: "orbitterm-server"
-      JWT_EXPIRE_HOURS: "24"
+      JWT_ACCESS_EXPIRE_MINUTES: "15"
+      JWT_REFRESH_EXPIRE_DAYS: "30"
     ports:
       - "8080:8080"
 

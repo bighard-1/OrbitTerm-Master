@@ -10,44 +10,93 @@ import (
 
 // JWTManager 管理 JWT 令牌签发与校验。
 type JWTManager struct {
-	secretKey   []byte
-	issuer      string
-	expireHours int
+	secretKey           []byte
+	issuer              string
+	accessExpireMinutes int
+	refreshExpireDays   int
 }
 
 // CustomClaims 是 OrbitTerm 使用的 JWT 声明。
 type CustomClaims struct {
-	UserID   uint   `json:"uid"`
-	Username string `json:"username"`
+	UserID    uint   `json:"uid"`
+	Username  string `json:"username"`
+	TokenType string `json:"typ"`
 	jwt.RegisteredClaims
 }
 
-func NewJWTManager(secret, issuer string, expireHours int) *JWTManager {
+type TokenPair struct {
+	AccessToken             string
+	RefreshToken            string
+	AccessExpiresInSeconds  int64
+	RefreshExpiresInSeconds int64
+}
+
+func NewJWTManager(secret, issuer string, accessExpireMinutes, refreshExpireDays, legacyExpireHours int) *JWTManager {
+	if accessExpireMinutes <= 0 {
+		accessExpireMinutes = legacyExpireHours * 60
+		if accessExpireMinutes <= 0 {
+			accessExpireMinutes = 15
+		}
+	}
+	if refreshExpireDays <= 0 {
+		refreshExpireDays = 30
+	}
 	return &JWTManager{
-		secretKey:   []byte(secret),
-		issuer:      issuer,
-		expireHours: expireHours,
+		secretKey:           []byte(secret),
+		issuer:              issuer,
+		accessExpireMinutes: accessExpireMinutes,
+		refreshExpireDays:   refreshExpireDays,
 	}
 }
 
-// GenerateToken 为指定用户生成签名后的 JWT。
-func (m *JWTManager) GenerateToken(userID uint, username string) (string, error) {
+// GenerateTokenPair 为指定用户生成 access + refresh 双令牌。
+func (m *JWTManager) GenerateTokenPair(userID uint, username string) (*TokenPair, error) {
 	now := time.Now().UTC()
-	expiresAt := now.Add(time.Duration(m.expireHours) * time.Hour)
+	accessExpiresAt := now.Add(time.Duration(m.accessExpireMinutes) * time.Minute)
+	refreshExpiresAt := now.Add(time.Duration(m.refreshExpireDays) * 24 * time.Hour)
 
-	claims := CustomClaims{
-		UserID:   userID,
-		Username: username,
+	accessClaims := CustomClaims{
+		UserID:    userID,
+		Username:  username,
+		TokenType: "access",
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    m.issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
+			ExpiresAt: jwt.NewNumericDate(accessExpiresAt),
 			Subject:   fmt.Sprintf("user:%d", userID),
 		},
 	}
 
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	return token.SignedString(m.secretKey)
+	refreshClaims := CustomClaims{
+		UserID:    userID,
+		Username:  username,
+		TokenType: "refresh",
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    m.issuer,
+			IssuedAt:  jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(refreshExpiresAt),
+			Subject:   fmt.Sprintf("user:%d", userID),
+		},
+	}
+
+	access := jwt.NewWithClaims(jwt.SigningMethodHS256, accessClaims)
+	accessToken, err := access.SignedString(m.secretKey)
+	if err != nil {
+		return nil, err
+	}
+
+	refresh := jwt.NewWithClaims(jwt.SigningMethodHS256, refreshClaims)
+	refreshToken, err := refresh.SignedString(m.secretKey)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TokenPair{
+		AccessToken:             accessToken,
+		RefreshToken:            refreshToken,
+		AccessExpiresInSeconds:  int64(time.Until(accessExpiresAt).Seconds()),
+		RefreshExpiresInSeconds: int64(time.Until(refreshExpiresAt).Seconds()),
+	}, nil
 }
 
 // ParseAndVerifyToken 解析并验证 JWT：
@@ -70,5 +119,27 @@ func (m *JWTManager) ParseAndVerifyToken(tokenString string) (*CustomClaims, err
 		return nil, errors.New("invalid token claims")
 	}
 
+	return claims, nil
+}
+
+func (m *JWTManager) ParseAndVerifyAccessToken(tokenString string) (*CustomClaims, error) {
+	claims, err := m.ParseAndVerifyToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "access" {
+		return nil, errors.New("invalid token type")
+	}
+	return claims, nil
+}
+
+func (m *JWTManager) ParseAndVerifyRefreshToken(tokenString string) (*CustomClaims, error) {
+	claims, err := m.ParseAndVerifyToken(tokenString)
+	if err != nil {
+		return nil, err
+	}
+	if claims.TokenType != "refresh" {
+		return nil, errors.New("invalid token type")
+	}
 	return claims, nil
 }

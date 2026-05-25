@@ -12,6 +12,7 @@ import (
 type UserRepository interface {
 	Create(user *model.User) error
 	FindByUsername(username string) (*model.User, error)
+	FindByID(id uint) (*model.User, error)
 }
 
 type userRepository struct {
@@ -29,6 +30,18 @@ func (r *userRepository) Create(user *model.User) error {
 func (r *userRepository) FindByUsername(username string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("username = ?", username).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	return &user, nil
+}
+
+func (r *userRepository) FindByID(id uint) (*model.User, error) {
+	var user model.User
+	err := r.db.Where("id = ?", id).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

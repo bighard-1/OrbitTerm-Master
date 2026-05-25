@@ -21,6 +21,7 @@ func Register(
 		{
 			auth.POST("/register", authController.Register)
 			auth.POST("/login", authController.Login)
+			auth.POST("/refresh", authController.Refresh)
 		}
 
 		configGroup := v1.Group("/config")

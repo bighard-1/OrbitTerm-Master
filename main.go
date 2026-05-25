@@ -36,7 +36,13 @@ func main() {
 	}
 
 	// 安全组件初始化：JWT 签发器与校验器。
-	jwtManager := utils.NewJWTManager(cfg.JWTSecret, cfg.JWTIssuer, cfg.JWTExpireHours)
+	jwtManager := utils.NewJWTManager(
+		cfg.JWTSecret,
+		cfg.JWTIssuer,
+		cfg.JWTAccessExpireMinutes,
+		cfg.JWTRefreshExpireDays,
+		cfg.JWTExpireHours,
+	)
 
 	// 组装领域依赖。
 	userRepo := repository.NewUserRepository(db)

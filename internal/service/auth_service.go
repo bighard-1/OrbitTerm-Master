@@ -18,7 +18,8 @@ var (
 // AuthService 提供身份认证相关业务逻辑。
 type AuthService interface {
 	Register(username, password string) (*model.User, error)
-	Login(username, password string) (string, error)
+	Login(username, password string) (*utils.TokenPair, error)
+	Refresh(refreshToken string) (*utils.TokenPair, error)
 }
 
 type authService struct {
@@ -71,31 +72,57 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 // 1) 根据用户名查询用户；
 // 2) 校验 Argon2id 哈希；
 // 3) 签发 JWT。
-func (s *authService) Login(username, password string) (string, error) {
+func (s *authService) Login(username, password string) (*utils.TokenPair, error) {
 	username = strings.TrimSpace(username)
 	if username == "" || password == "" {
-		return "", ErrInvalidInput
+		return nil, ErrInvalidInput
 	}
 
 	user, err := s.userRepo.FindByUsername(username)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if user == nil {
-		return "", ErrInvalidCredential
+		return nil, ErrInvalidCredential
 	}
 
 	matched, err := utils.VerifyPasswordArgon2ID(password, user.PasswordHash)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 	if !matched {
-		return "", ErrInvalidCredential
+		return nil, ErrInvalidCredential
 	}
 
-	token, err := s.jwtManager.GenerateToken(user.ID, user.Username)
+	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	return token, nil
+	return pair, nil
+}
+
+func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
+	token := strings.TrimSpace(refreshToken)
+	if token == "" {
+		return nil, ErrInvalidInput
+	}
+
+	claims, err := s.jwtManager.ParseAndVerifyRefreshToken(token)
+	if err != nil {
+		return nil, ErrInvalidCredential
+	}
+
+	user, err := s.userRepo.FindByID(claims.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil || user.Username != claims.Username {
+		return nil, ErrInvalidCredential
+	}
+
+	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username)
+	if err != nil {
+		return nil, err
+	}
+	return pair, nil
 }

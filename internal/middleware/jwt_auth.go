@@ -35,7 +35,7 @@ func JWTAuthMiddleware(jwtManager *utils.JWTManager) gin.HandlerFunc {
 			return
 		}
 
-		claims, err := jwtManager.ParseAndVerifyToken(strings.TrimSpace(parts[1]))
+		claims, err := jwtManager.ParseAndVerifyAccessToken(strings.TrimSpace(parts[1]))
 		if err != nil {
 			common.Error(ctx, http.StatusUnauthorized, "Token 无效或已过期")
 			ctx.Abort()

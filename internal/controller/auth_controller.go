@@ -31,6 +31,10 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token" binding:"required"`
+}
+
 // Register godoc
 // @Summary 用户注册
 // @Description 创建新用户，密码将使用 Argon2id 算法进行哈希。
@@ -87,7 +91,7 @@ func (c *AuthController) Login(ctx *gin.Context) {
 		return
 	}
 
-	token, err := c.authService.Login(req.Username, req.Password)
+	pair, err := c.authService.Login(req.Username, req.Password)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
@@ -101,7 +105,51 @@ func (c *AuthController) Login(ctx *gin.Context) {
 	}
 
 	common.Success(ctx, http.StatusOK, gin.H{
-		"token": token,
-		"type":  "Bearer",
+		"access_token":               pair.AccessToken,
+		"refresh_token":              pair.RefreshToken,
+		"token":                      pair.AccessToken,
+		"type":                       "Bearer",
+		"expires_in_seconds":         pair.AccessExpiresInSeconds,
+		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+	})
+}
+
+// Refresh godoc
+// @Summary 刷新访问令牌
+// @Description 使用 refresh token 申请新的 access token 与 refresh token（轮换）。
+// @Tags auth
+// @Accept json
+// @Produce json
+// @Param payload body refreshRequest true "刷新令牌信息"
+// @Success 200 {object} map[string]any
+// @Failure 400 {object} map[string]any
+// @Failure 401 {object} map[string]any
+// @Router /api/v1/auth/refresh [post]
+func (c *AuthController) Refresh(ctx *gin.Context) {
+	var req refreshRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	pair, err := c.authService.Refresh(req.RefreshToken)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidInput):
+			common.Error(ctx, http.StatusBadRequest, "refresh_token 不能为空")
+		case errors.Is(err, service.ErrInvalidCredential):
+			common.Error(ctx, http.StatusUnauthorized, "refresh token 无效或已过期")
+		default:
+			common.Error(ctx, http.StatusInternalServerError, "刷新令牌失败")
+		}
+		return
+	}
+
+	common.Success(ctx, http.StatusOK, gin.H{
+		"access_token":               pair.AccessToken,
+		"refresh_token":              pair.RefreshToken,
+		"type":                       "Bearer",
+		"expires_in_seconds":         pair.AccessExpiresInSeconds,
+		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
 	})
 }
