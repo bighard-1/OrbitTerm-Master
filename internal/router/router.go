@@ -70,6 +70,11 @@ func Register(
 				adminController.BackupReadiness,
 			)
 			adminGroup.GET("/users", adminController.ListUsers)
+			adminGroup.POST(
+				"/users/expired-bans/scan",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.ScanExpiredBans,
+			)
 			adminGroup.GET("/users/:id", adminController.GetUser)
 			adminGroup.POST(
 				"/users/:id/ban",

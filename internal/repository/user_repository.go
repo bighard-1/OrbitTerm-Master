@@ -2,6 +2,7 @@ package repository
 
 import (
 	"errors"
+	"time"
 
 	"orbitterm-server/internal/model"
 
@@ -15,6 +16,7 @@ type UserRepository interface {
 	FindByUsername(username string) (*model.User, error)
 	FindByID(id uint) (*model.User, error)
 	CountByRoles(roles []string) (int64, error)
+	ListExpiredBans(now time.Time, limit int) ([]model.User, error)
 	List(filter UserListFilter) ([]model.User, int64, error)
 }
 
@@ -74,6 +76,20 @@ func (r *userRepository) CountByRoles(roles []string) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.User{}).Where("role IN ?", roles).Count(&count).Error
 	return count, err
+}
+
+func (r *userRepository) ListExpiredBans(now time.Time, limit int) ([]model.User, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	var users []model.User
+	err := r.db.
+		Where("is_banned = ? AND ban_until IS NOT NULL AND ban_until <= ?", true, now).
+		Order("ban_until ASC").
+		Limit(limit).
+		Find(&users).Error
+	return users, err
 }
 
 func (r *userRepository) List(filter UserListFilter) ([]model.User, int64, error) {

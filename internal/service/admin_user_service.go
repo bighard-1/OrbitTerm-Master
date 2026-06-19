@@ -15,6 +15,7 @@ import (
 var (
 	ErrAdminTargetNotFound = errors.New("目标用户不存在")
 	ErrAdminInvalidAction  = errors.New("管理操作不合法")
+	ErrAdminReasonRequired = errors.New("管理操作原因必填")
 )
 
 type AdminUserService interface {
@@ -26,6 +27,7 @@ type AdminUserService interface {
 	ForceLogout(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 	SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 	RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
+	ScanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error)
 }
 
 type AdminUserListFilter struct {
@@ -39,6 +41,18 @@ type AdminUserListFilter struct {
 type AdminRequestMeta struct {
 	IPAddress string
 	UserAgent string
+}
+
+type AdminExpiredBanScanResult struct {
+	ScannedCount  int                   `json:"scanned_count"`
+	UnbannedCount int                   `json:"unbanned_count"`
+	Items         []AdminExpiredBanItem `json:"items"`
+}
+
+type AdminExpiredBanItem struct {
+	UserID   uint   `json:"user_id"`
+	Username string `json:"username"`
+	Status   string `json:"status"`
 }
 
 type adminUserService struct {
@@ -85,6 +99,10 @@ func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
+	}
 	if adminID == targetUserID {
 		return nil, ErrAdminInvalidAction
 	}
@@ -98,7 +116,7 @@ func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *
 	now := s.now()
 	user.IsBanned = true
 	user.Status = model.UserStatusBanned
-	user.BanReason = strings.TrimSpace(reason)
+	user.BanReason = reason
 	user.BannedAt = &now
 	user.BannedBy = &adminID
 	user.TokenVersion++
@@ -132,6 +150,10 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
+	}
 
 	user, err := s.GetUser(targetUserID)
 	if err != nil {
@@ -164,7 +186,7 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 		AfterSnapshot:  auditSnapshot(user),
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
-		Reason:         strings.TrimSpace(reason),
+		Reason:         reason,
 	})
 	return user, nil
 }
@@ -172,6 +194,10 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword, reason string, meta AdminRequestMeta) (*model.User, error) {
 	if adminID == 0 || targetUserID == 0 || len(newPassword) < 8 {
 		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
 	}
 
 	user, err := s.GetUser(targetUserID)
@@ -202,7 +228,7 @@ func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword
 		AfterSnapshot:  auditSnapshot(user),
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
-		Reason:         strings.TrimSpace(reason),
+		Reason:         reason,
 	})
 	return user, nil
 }
@@ -210,6 +236,10 @@ func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword
 func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
 	}
 
 	user, err := s.GetUser(targetUserID)
@@ -233,7 +263,7 @@ func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string
 		AfterSnapshot:  auditSnapshot(user),
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
-		Reason:         strings.TrimSpace(reason),
+		Reason:         reason,
 	})
 	return user, nil
 }
@@ -241,6 +271,10 @@ func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string
 func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
 	}
 	if adminID == targetUserID {
 		return nil, ErrAdminInvalidAction
@@ -271,7 +305,7 @@ func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason str
 		AfterSnapshot:  auditSnapshot(user),
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
-		Reason:         strings.TrimSpace(reason),
+		Reason:         reason,
 	})
 	return user, nil
 }
@@ -279,6 +313,10 @@ func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason str
 func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
 	}
 
 	user, err := s.GetUser(targetUserID)
@@ -309,9 +347,68 @@ func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string
 		AfterSnapshot:  auditSnapshot(user),
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
-		Reason:         strings.TrimSpace(reason),
+		Reason:         reason,
 	})
 	return user, nil
+}
+
+func (s *adminUserService) ScanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error) {
+	if adminID == 0 {
+		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
+	}
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+
+	now := s.now()
+	users, err := s.userRepo.ListExpiredBans(now, limit)
+	if err != nil {
+		return nil, err
+	}
+
+	result := &AdminExpiredBanScanResult{
+		ScannedCount: len(users),
+		Items:        make([]AdminExpiredBanItem, 0, len(users)),
+	}
+	for i := range users {
+		user := users[i]
+		before := auditSnapshot(&user)
+		if !user.ClearExpiredBan(now) {
+			continue
+		}
+		user.TokenVersion++
+		if err := s.userRepo.Save(&user); err != nil {
+			return nil, err
+		}
+
+		result.UnbannedCount++
+		result.Items = append(result.Items, AdminExpiredBanItem{
+			UserID:   user.ID,
+			Username: user.Username,
+			Status:   user.Status,
+		})
+		_ = s.auditService.Record(AdminAuditEntry{
+			AdminUserID:    adminID,
+			TargetUserID:   &user.ID,
+			Action:         model.AuditActionUserAutoUnban,
+			ResourceType:   "user",
+			ResourceID:     strconv.FormatUint(uint64(user.ID), 10),
+			BeforeSnapshot: before,
+			AfterSnapshot:  auditSnapshot(&user),
+			IPAddress:      meta.IPAddress,
+			UserAgent:      meta.UserAgent,
+			Reason:         reason,
+		})
+	}
+	return result, nil
+}
+
+func validAdminReason(reason string) bool {
+	return len(strings.TrimSpace(reason)) >= 2
 }
 
 func auditSnapshot(user *model.User) string {

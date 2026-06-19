@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"orbitterm-server/internal/common"
 	"orbitterm-server/internal/middleware"
@@ -124,12 +125,29 @@ func (c *AdminController) Me(ctx *gin.Context) {
 }
 
 func (c *AdminController) AuditLogs(ctx *gin.Context) {
-	logs, err := c.auditService.ListRecent(50)
+	limit := parseQueryInt(ctx, "limit", 50)
+	offset := parseQueryInt(ctx, "offset", 0)
+	adminUserID := parseQueryUint(ctx, "admin_user_id")
+	targetUserID := parseQueryUint(ctx, "target_user_id")
+
+	logs, total, err := c.auditService.List(service.AdminAuditListFilter{
+		Action:       ctx.Query("action"),
+		ResourceType: ctx.Query("resource_type"),
+		AdminUserID:  adminUserID,
+		TargetUserID: targetUserID,
+		Limit:        limit,
+		Offset:       offset,
+	})
 	if err != nil {
 		common.Error(ctx, http.StatusInternalServerError, "审计日志读取失败")
 		return
 	}
-	common.Success(ctx, http.StatusOK, gin.H{"items": logs})
+	common.Success(ctx, http.StatusOK, gin.H{
+		"items":  logs,
+		"total":  total,
+		"limit":  limit,
+		"offset": offset,
+	})
 }
 
 func (c *AdminController) GetSecurityPolicy(ctx *gin.Context) {
@@ -265,6 +283,7 @@ func (c *AdminController) GetUser(ctx *gin.Context) {
 type banUserRequest struct {
 	DurationMinutes *int   `json:"duration_minutes,omitempty"`
 	Reason          string `json:"reason"`
+	Confirmation    string `json:"confirmation"`
 }
 
 func (c *AdminController) BanUser(ctx *gin.Context) {
@@ -283,6 +302,9 @@ func (c *AdminController) BanUser(ctx *gin.Context) {
 	var req banUserRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
 		return
 	}
 
@@ -316,6 +338,9 @@ func (c *AdminController) UnbanUser(ctx *gin.Context) {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
 		return
 	}
+	if !validateReason(ctx, req.Reason) {
+		return
+	}
 
 	user, err := c.userService.UnbanUser(adminID, userID, req.Reason, requestMeta(ctx))
 	if err != nil {
@@ -326,8 +351,9 @@ func (c *AdminController) UnbanUser(ctx *gin.Context) {
 }
 
 type resetPasswordRequest struct {
-	NewPassword string `json:"new_password" binding:"required"`
-	Reason      string `json:"reason"`
+	NewPassword  string `json:"new_password" binding:"required"`
+	Reason       string `json:"reason"`
+	Confirmation string `json:"confirmation"`
 }
 
 func (c *AdminController) ResetPassword(ctx *gin.Context) {
@@ -347,6 +373,9 @@ func (c *AdminController) ResetPassword(ctx *gin.Context) {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
 		return
 	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
 
 	user, err := c.userService.ResetPassword(adminID, userID, req.NewPassword, req.Reason, requestMeta(ctx))
 	if err != nil {
@@ -357,7 +386,8 @@ func (c *AdminController) ResetPassword(ctx *gin.Context) {
 }
 
 type adminReasonRequest struct {
-	Reason string `json:"reason"`
+	Reason       string `json:"reason"`
+	Confirmation string `json:"confirmation"`
 }
 
 func (c *AdminController) ForceLogout(ctx *gin.Context) {
@@ -375,6 +405,9 @@ func (c *AdminController) ForceLogout(ctx *gin.Context) {
 	var req adminReasonRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
 		return
 	}
 
@@ -403,6 +436,9 @@ func (c *AdminController) SoftDeleteUser(ctx *gin.Context) {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
 		return
 	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
 
 	user, err := c.userService.SoftDeleteUser(adminID, userID, req.Reason, requestMeta(ctx))
 	if err != nil {
@@ -429,6 +465,9 @@ func (c *AdminController) RestoreUser(ctx *gin.Context) {
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
 		return
 	}
+	if !validateReason(ctx, req.Reason) {
+		return
+	}
 
 	user, err := c.userService.RestoreUser(adminID, userID, req.Reason, requestMeta(ctx))
 	if err != nil {
@@ -436,6 +475,36 @@ func (c *AdminController) RestoreUser(ctx *gin.Context) {
 		return
 	}
 	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
+type scanExpiredBansRequest struct {
+	Limit        int    `json:"limit"`
+	Reason       string `json:"reason"`
+	Confirmation string `json:"confirmation"`
+}
+
+func (c *AdminController) ScanExpiredBans(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req scanExpiredBansRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+
+	result, err := c.userService.ScanExpiredBans(adminID, req.Limit, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "过期封禁扫描失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, result)
 }
 
 func extractContextUint(ctx *gin.Context, key string) (uint, bool) {
@@ -470,11 +539,42 @@ func parseQueryInt(ctx *gin.Context, key string, fallback int) int {
 	return value
 }
 
+func parseQueryUint(ctx *gin.Context, key string) uint {
+	raw := ctx.Query(key)
+	if raw == "" {
+		return 0
+	}
+	value, err := strconv.ParseUint(raw, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return uint(value)
+}
+
 func requestMeta(ctx *gin.Context) service.AdminRequestMeta {
 	return service.AdminRequestMeta{
 		IPAddress: ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
 	}
+}
+
+func validateReason(ctx *gin.Context, reason string) bool {
+	if len(strings.TrimSpace(reason)) < 2 {
+		common.Error(ctx, http.StatusBadRequest, "管理操作原因必填，且至少 2 个字符")
+		return false
+	}
+	return true
+}
+
+func validateHighRiskRequest(ctx *gin.Context, reason, confirmation string) bool {
+	if !validateReason(ctx, reason) {
+		return false
+	}
+	if strings.TrimSpace(confirmation) != "CONFIRM" {
+		common.Error(ctx, http.StatusBadRequest, "高危操作需要二次确认，请传入 confirmation=CONFIRM")
+		return false
+	}
+	return true
 }
 
 func (c *AdminController) validateBootstrapToken(ctx *gin.Context) bool {
@@ -518,6 +618,8 @@ func writeAdminUserError(ctx *gin.Context, err error, fallback string) {
 		common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
 	case errors.Is(err, service.ErrAdminInvalidAction):
 		common.Error(ctx, http.StatusBadRequest, "不允许执行该管理操作")
+	case errors.Is(err, service.ErrAdminReasonRequired):
+		common.Error(ctx, http.StatusBadRequest, "管理操作原因必填")
 	case errors.Is(err, service.ErrAdminTargetNotFound):
 		common.Error(ctx, http.StatusNotFound, "目标用户不存在")
 	default:

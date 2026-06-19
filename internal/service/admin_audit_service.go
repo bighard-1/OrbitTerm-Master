@@ -8,6 +8,16 @@ import (
 type AdminAuditService interface {
 	Record(entry AdminAuditEntry) error
 	ListRecent(limit int) ([]model.AdminAuditLog, error)
+	List(filter AdminAuditListFilter) ([]model.AdminAuditLog, int64, error)
+}
+
+type AdminAuditListFilter struct {
+	Action       string
+	ResourceType string
+	AdminUserID  uint
+	TargetUserID uint
+	Limit        int
+	Offset       int
 }
 
 type AdminAuditEntry struct {
@@ -52,4 +62,15 @@ func (s *adminAuditService) Record(entry AdminAuditEntry) error {
 
 func (s *adminAuditService) ListRecent(limit int) ([]model.AdminAuditLog, error) {
 	return s.repo.List(limit)
+}
+
+func (s *adminAuditService) List(filter AdminAuditListFilter) ([]model.AdminAuditLog, int64, error) {
+	return s.repo.ListWithFilter(repository.AdminAuditListFilter{
+		Action:       filter.Action,
+		ResourceType: filter.ResourceType,
+		AdminUserID:  filter.AdminUserID,
+		TargetUserID: filter.TargetUserID,
+		Limit:        filter.Limit,
+		Offset:       filter.Offset,
+	})
 }

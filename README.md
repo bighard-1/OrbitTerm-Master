@@ -79,6 +79,13 @@ OrbitTerm-Server
 - `GET /api/v1/admin/system/recovery-policy`
 - `PUT /api/v1/admin/system/recovery-policy`
 - `GET /api/v1/admin/system/backup-readiness`
+- `GET /api/v1/admin/audit-logs?action=&admin_user_id=&target_user_id=&limit=&offset=`
+- `POST /api/v1/admin/users/expired-bans/scan`
+
+管理端高危操作要求：
+
+- 封禁、重置登录密码、强制下线、软删除、过期封禁扫描必须传入 `reason`。
+- 上述高危操作还必须传入 `confirmation: "CONFIRM"`，用于后端二次确认。
 
 ### 注册示例
 

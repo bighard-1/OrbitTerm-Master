@@ -71,6 +71,19 @@ func TestAdminUserServiceRejectsSelfBan(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceRequiresReasonForHighRiskActions(t *testing.T) {
+	svc := &adminUserService{
+		userRepo:     newFakeUserRepo(&model.User{ID: 2, Username: "alice", Status: model.UserStatusNormal}),
+		auditService: &fakeAdminAuditService{},
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+
+	_, err := svc.BanUser(1, 2, nil, "", AdminRequestMeta{})
+	if !errors.Is(err, ErrAdminReasonRequired) {
+		t.Fatalf("expected ErrAdminReasonRequired, got %v", err)
+	}
+}
+
 func TestAdminUserServiceResetPasswordAndForceLogout(t *testing.T) {
 	userRepo := newFakeUserRepo(&model.User{
 		ID:           2,
@@ -155,6 +168,37 @@ func TestAdminUserServiceSoftDeleteAndRestore(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceScanExpiredBans(t *testing.T) {
+	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+	expiredAt := now.Add(-time.Minute)
+	future := now.Add(time.Hour)
+	userRepo := newFakeUserRepo(
+		&model.User{ID: 2, Username: "expired", Status: model.UserStatusBanned, IsBanned: true, BanUntil: &expiredAt, TokenVersion: 1},
+		&model.User{ID: 3, Username: "active", Status: model.UserStatusBanned, IsBanned: true, BanUntil: &future, TokenVersion: 1},
+	)
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return now },
+	}
+
+	result, err := svc.ScanExpiredBans(1, 100, "到期自动解封", AdminRequestMeta{IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("ScanExpiredBans failed: %v", err)
+	}
+	if result.ScannedCount != 1 || result.UnbannedCount != 1 || len(result.Items) != 1 || result.Items[0].UserID != 2 {
+		t.Fatalf("unexpected scan result: %+v", result)
+	}
+	user, _ := userRepo.FindByID(2)
+	if user.IsBanned || user.Status != model.UserStatusNormal || user.TokenVersion != 2 {
+		t.Fatalf("expected expired user unbanned, got %+v", user)
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Action != model.AuditActionUserAutoUnban {
+		t.Fatalf("expected auto unban audit, got %+v", audit.entries)
+	}
+}
+
 type fakeUserRepo struct {
 	users map[uint]*model.User
 }
@@ -223,6 +267,19 @@ func (r *fakeUserRepo) CountByRoles(roles []string) (int64, error) {
 	return count, nil
 }
 
+func (r *fakeUserRepo) ListExpiredBans(now time.Time, limit int) ([]model.User, error) {
+	users := make([]model.User, 0)
+	for _, user := range r.users {
+		if user.IsBanned && user.BanUntil != nil && !user.BanUntil.After(now) {
+			users = append(users, *user)
+		}
+	}
+	if limit > 0 && len(users) > limit {
+		users = users[:limit]
+	}
+	return users, nil
+}
+
 func (r *fakeUserRepo) List(filter repository.UserListFilter) ([]model.User, int64, error) {
 	users := make([]model.User, 0, len(r.users))
 	for _, user := range r.users {
@@ -242,4 +299,8 @@ func (s *fakeAdminAuditService) Record(entry AdminAuditEntry) error {
 
 func (s *fakeAdminAuditService) ListRecent(_ int) ([]model.AdminAuditLog, error) {
 	return nil, nil
+}
+
+func (s *fakeAdminAuditService) List(_ AdminAuditListFilter) ([]model.AdminAuditLog, int64, error) {
+	return nil, 0, nil
 }

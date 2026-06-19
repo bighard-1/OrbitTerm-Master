@@ -181,3 +181,5 @@ OrbitTerm 后端采用零知识同步模型：
 3. `POST /api/v1/auth/register` 正常。
 4. `POST /api/v1/auth/login` 可返回 JWT。
 5. 带 Bearer Token 调用 `/api/v1/config/upload` 正常。
+6. 管理端调用 `/api/v1/admin/system/backup-readiness` 可返回脱敏环境检查结果。
+7. 管理端高危操作必须填写原因，并传入 `confirmation=CONFIRM`，否则后端会拒绝执行。

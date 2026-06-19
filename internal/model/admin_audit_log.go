@@ -8,6 +8,7 @@ const (
 	AuditActionAdminMe                   = "admin_me"
 	AuditActionSystemBackupReadinessView = "system_backup_readiness_view"
 	AuditActionUserBan                   = "user_ban"
+	AuditActionUserAutoUnban             = "user_auto_unban"
 	AuditActionUserUnban                 = "user_unban"
 	AuditActionUserResetPassword         = "user_reset_password"
 	AuditActionUserForceLogout           = "user_force_logout"
