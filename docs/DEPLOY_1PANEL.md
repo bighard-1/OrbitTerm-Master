@@ -150,8 +150,12 @@ OrbitTerm 后端采用零知识同步模型：
 2. 建议使用 1Panel 网站反向代理到：
    - `http://127.0.0.1:8080`
 3. 在 1Panel 中为域名申请 HTTPS 证书（如 Let's Encrypt）。
-4. 定期备份 PostgreSQL 卷：
-   - `orbit_db_data`
+4. 定期执行备份，建议至少包含：
+   - PostgreSQL 数据库快照（优先使用 1Panel 数据库备份或容器内 `pg_dump`）。
+   - 脱敏环境变量快照：记录 `JWT_SECRET`、`DATABASE_URL`、`JWT_ISSUER` 等变量是否配置，但不要把密钥原文写入普通文档。
+   - 后端镜像版本号/tag/digest。
+   - 1Panel 反向代理、域名、HTTPS 证书配置。
+5. 管理端可调用 `GET /api/v1/admin/system/backup-readiness` 查看备份就绪状态和环境变量脱敏检查结果。
 
 ## 7. 升级与回滚
 

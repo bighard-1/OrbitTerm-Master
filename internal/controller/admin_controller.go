@@ -20,6 +20,7 @@ type AdminController struct {
 	adminAuthService    service.AdminAuthService
 	securityPolicy      service.SecurityPolicyService
 	recoveryPolicy      service.RecoveryPolicyService
+	backupReadiness     service.BackupReadinessService
 	adminBootstrapToken string
 }
 
@@ -29,6 +30,7 @@ func NewAdminController(
 	adminAuthService service.AdminAuthService,
 	securityPolicy service.SecurityPolicyService,
 	recoveryPolicy service.RecoveryPolicyService,
+	backupReadiness service.BackupReadinessService,
 	adminBootstrapToken string,
 ) *AdminController {
 	return &AdminController{
@@ -37,6 +39,7 @@ func NewAdminController(
 		adminAuthService:    adminAuthService,
 		securityPolicy:      securityPolicy,
 		recoveryPolicy:      recoveryPolicy,
+		backupReadiness:     backupReadiness,
 		adminBootstrapToken: adminBootstrapToken,
 	}
 }
@@ -195,6 +198,25 @@ func (c *AdminController) UpdateRecoveryPolicy(ctx *gin.Context) {
 		return
 	}
 	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) BackupReadiness(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	report, err := c.backupReadiness.GetReadiness(adminID, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "备份自检失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, report)
 }
 
 func (c *AdminController) ListUsers(ctx *gin.Context) {

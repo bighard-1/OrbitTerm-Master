@@ -51,6 +51,7 @@ func main() {
 	systemSettingRepo := repository.NewSystemSettingRepository(db)
 	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
 	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService)
+	backupReadinessService := service.NewBackupReadinessService(db, cfg, adminAuditService)
 	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService)
 	authController := controller.NewAuthController(authService, recoveryPolicyService)
 
@@ -66,6 +67,7 @@ func main() {
 		adminAuthService,
 		securityPolicyService,
 		recoveryPolicyService,
+		backupReadinessService,
 		cfg.AdminBootstrapToken,
 	)
 

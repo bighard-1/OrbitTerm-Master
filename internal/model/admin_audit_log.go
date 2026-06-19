@@ -3,15 +3,16 @@ package model
 import "time"
 
 const (
-	AuditActionAdminBootstrap    = "admin_bootstrap"
-	AuditActionAdminLogin        = "admin_login"
-	AuditActionAdminMe           = "admin_me"
-	AuditActionUserBan           = "user_ban"
-	AuditActionUserUnban         = "user_unban"
-	AuditActionUserResetPassword = "user_reset_password"
-	AuditActionUserForceLogout   = "user_force_logout"
-	AuditActionUserSoftDelete    = "user_soft_delete"
-	AuditActionUserRestore       = "user_restore"
+	AuditActionAdminBootstrap            = "admin_bootstrap"
+	AuditActionAdminLogin                = "admin_login"
+	AuditActionAdminMe                   = "admin_me"
+	AuditActionSystemBackupReadinessView = "system_backup_readiness_view"
+	AuditActionUserBan                   = "user_ban"
+	AuditActionUserUnban                 = "user_unban"
+	AuditActionUserResetPassword         = "user_reset_password"
+	AuditActionUserForceLogout           = "user_force_logout"
+	AuditActionUserSoftDelete            = "user_soft_delete"
+	AuditActionUserRestore               = "user_restore"
 )
 
 // AdminAuditLog 记录管理端敏感操作。

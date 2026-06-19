@@ -78,6 +78,7 @@ OrbitTerm-Server
 - `PUT /api/v1/admin/system/security-policy`
 - `GET /api/v1/admin/system/recovery-policy`
 - `PUT /api/v1/admin/system/recovery-policy`
+- `GET /api/v1/admin/system/backup-readiness`
 
 ### 注册示例
 
