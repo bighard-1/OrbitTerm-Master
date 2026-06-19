@@ -91,6 +91,7 @@ volumes:
 1. `orbit-db` 状态为 `healthy`。
 2. `orbit-api` 日志出现“启动成功，监听端口: 8080”。
 3. 使用管理端首次初始化接口创建 `super_admin` 后，建议轮换或清空 `ADMIN_BOOTSTRAP_TOKEN` 并重启后端。
+4. 管理端初始化、登录与用户治理示例见：[ADMIN_API.md](ADMIN_API.md)。
 
 ## 4. 环境变量说明（与代码保持一致）
 
