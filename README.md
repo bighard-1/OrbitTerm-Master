@@ -46,9 +46,16 @@ OrbitTerm-Server
 
 - `SystemSetting`
   - `Key`：系统配置键，例如 `security_policy`
-  - `Value`：JSON 文本配置，用于保存注册开关、密码强度等管理端策略
+  - `Value`：JSON 文本配置，用于保存注册开关、密码强度、恢复边界等管理端策略
 
-## 三、环境变量
+## 三、账号密码与主密码恢复边界
+
+- 登录密码：属于账号认证体系，管理员可按权限重置，并会强制旧 Token 失效。
+- 主密码：属于客户端零知识加密体系，后端不保存主密码、派生密钥，也无法解密用户资产。
+- 忘记主密码：管理员无法找回原主密码；用户只能在客户端执行主密码重设流程。若没有旧主密码或本地可用解密材料，旧加密资产无法被服务端恢复。
+- 修改主密码：客户端必须先用旧主密码解密资产，再用新主密码重新加密后同步到云端。
+
+## 四、环境变量
 
 可选环境变量（均有默认值）：
 
@@ -61,13 +68,16 @@ OrbitTerm-Server
 - `JWT_EXPIRE_HOURS`（兼容旧配置，未设置新变量时回退）
 - `ADMIN_BOOTSTRAP_TOKEN`（无默认值；用于首次创建 `super_admin`，生产必须配置高强度随机值）
 
-## 四、接口
+## 五、接口
 
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
+- `GET /api/v1/auth/recovery-info`
 - `GET /api/v1/admin/system/security-policy`
 - `PUT /api/v1/admin/system/security-policy`
+- `GET /api/v1/admin/system/recovery-policy`
+- `PUT /api/v1/admin/system/recovery-policy`
 
 ### 注册示例
 
@@ -85,7 +95,7 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
   -d '{"username":"alice","password":"StrongPass123"}'
 ```
 
-## 五、运行
+## 六、运行
 
 ```bash
 go run .

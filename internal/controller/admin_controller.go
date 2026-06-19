@@ -19,6 +19,7 @@ type AdminController struct {
 	userService         service.AdminUserService
 	adminAuthService    service.AdminAuthService
 	securityPolicy      service.SecurityPolicyService
+	recoveryPolicy      service.RecoveryPolicyService
 	adminBootstrapToken string
 }
 
@@ -27,6 +28,7 @@ func NewAdminController(
 	userService service.AdminUserService,
 	adminAuthService service.AdminAuthService,
 	securityPolicy service.SecurityPolicyService,
+	recoveryPolicy service.RecoveryPolicyService,
 	adminBootstrapToken string,
 ) *AdminController {
 	return &AdminController{
@@ -34,6 +36,7 @@ func NewAdminController(
 		userService:         userService,
 		adminAuthService:    adminAuthService,
 		securityPolicy:      securityPolicy,
+		recoveryPolicy:      recoveryPolicy,
 		adminBootstrapToken: adminBootstrapToken,
 	}
 }
@@ -155,6 +158,40 @@ func (c *AdminController) UpdateSecurityPolicy(ctx *gin.Context) {
 			return
 		}
 		common.Error(ctx, http.StatusInternalServerError, "安全策略更新失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) GetRecoveryPolicy(ctx *gin.Context) {
+	policy, err := c.recoveryPolicy.GetRecoveryPolicy()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "恢复策略读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) UpdateRecoveryPolicy(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req service.RecoveryPolicyUpdate
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	policy, err := c.recoveryPolicy.UpdateRecoveryPolicy(adminID, req, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "恢复策略更新失败")
 		return
 	}
 	common.Success(ctx, http.StatusOK, policy)

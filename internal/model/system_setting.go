@@ -7,8 +7,10 @@ import (
 
 const (
 	SystemSettingKeySecurityPolicy = "security_policy"
+	SystemSettingKeyRecoveryPolicy = "recovery_policy"
 
 	AuditActionSystemSecurityPolicyUpdate = "system_security_policy_update"
+	AuditActionSystemRecoveryPolicyUpdate = "system_recovery_policy_update"
 )
 
 // SystemSetting 存储服务端运行策略等小型配置。
@@ -62,4 +64,51 @@ func (p *SecurityPolicy) Normalize() {
 		p.DefaultUserStatus = UserStatusNormal
 	}
 	p.RegistrationDisabledReason = strings.TrimSpace(p.RegistrationDisabledReason)
+}
+
+const (
+	MasterPasswordRecoveryModeZeroKnowledge = "zero_knowledge_reset_only"
+	MasterPasswordResetBehaviorClientSide   = "client_reencrypt_required"
+)
+
+// RecoveryPolicy 描述账号密码、主密码与云端密文之间的恢复边界。
+// 安全不变量：后端不保存主密码、不保存派生密钥，也不具备解密用户资产的能力。
+type RecoveryPolicy struct {
+	LoginPasswordResetEnabled       bool   `json:"login_password_reset_enabled"`
+	MasterPasswordRecoverable       bool   `json:"master_password_recoverable"`
+	MasterPasswordRecoveryMode      string `json:"master_password_recovery_mode"`
+	MasterPasswordResetBehavior     string `json:"master_password_reset_behavior"`
+	ServerCanDecryptUserAssets      bool   `json:"server_can_decrypt_user_assets"`
+	EncryptedAssetsPreservedOnReset bool   `json:"encrypted_assets_preserved_on_reset"`
+	RequireUserAcknowledgement      bool   `json:"require_user_acknowledgement"`
+	SupportContact                  string `json:"support_contact,omitempty"`
+	UserFacingMessage               string `json:"user_facing_message"`
+}
+
+func DefaultRecoveryPolicy() RecoveryPolicy {
+	return RecoveryPolicy{
+		LoginPasswordResetEnabled:       true,
+		MasterPasswordRecoverable:       false,
+		MasterPasswordRecoveryMode:      MasterPasswordRecoveryModeZeroKnowledge,
+		MasterPasswordResetBehavior:     MasterPasswordResetBehaviorClientSide,
+		ServerCanDecryptUserAssets:      false,
+		EncryptedAssetsPreservedOnReset: true,
+		RequireUserAcknowledgement:      true,
+		UserFacingMessage:               "OrbitTerm 采用零知识加密。管理员可以重置登录密码，但无法找回或解密您的主密码与服务器资产；修改主密码需要在客户端用旧主密码解密后重新加密。",
+	}
+}
+
+func (p *RecoveryPolicy) Normalize() {
+	// 以下字段是零知识安全边界，不允许通过管理端配置放宽。
+	p.MasterPasswordRecoverable = false
+	p.MasterPasswordRecoveryMode = MasterPasswordRecoveryModeZeroKnowledge
+	p.MasterPasswordResetBehavior = MasterPasswordResetBehaviorClientSide
+	p.ServerCanDecryptUserAssets = false
+	p.EncryptedAssetsPreservedOnReset = true
+
+	p.SupportContact = strings.TrimSpace(p.SupportContact)
+	p.UserFacingMessage = strings.TrimSpace(p.UserFacingMessage)
+	if p.UserFacingMessage == "" {
+		p.UserFacingMessage = DefaultRecoveryPolicy().UserFacingMessage
+	}
 }

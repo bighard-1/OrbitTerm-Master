@@ -26,6 +26,7 @@ func Register(
 			auth.POST("/register", authController.Register)
 			auth.POST("/login", authController.Login)
 			auth.POST("/refresh", authController.Refresh)
+			auth.GET("/recovery-info", authController.RecoveryInfo)
 		}
 
 		configGroup := v1.Group("/config")
@@ -56,6 +57,12 @@ func Register(
 				"/system/security-policy",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.UpdateSecurityPolicy,
+			)
+			adminGroup.GET("/system/recovery-policy", adminController.GetRecoveryPolicy)
+			adminGroup.PUT(
+				"/system/recovery-policy",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.UpdateRecoveryPolicy,
 			)
 			adminGroup.GET("/users", adminController.ListUsers)
 			adminGroup.GET("/users/:id", adminController.GetUser)

@@ -50,8 +50,9 @@ func main() {
 	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
 	systemSettingRepo := repository.NewSystemSettingRepository(db)
 	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
+	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService)
 	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService)
-	authController := controller.NewAuthController(authService)
+	authController := controller.NewAuthController(authService, recoveryPolicyService)
 
 	configRepo := repository.NewServerConfigRepository(db)
 	configService := service.NewConfigService(configRepo)
@@ -64,6 +65,7 @@ func main() {
 		adminUserService,
 		adminAuthService,
 		securityPolicyService,
+		recoveryPolicyService,
 		cfg.AdminBootstrapToken,
 	)
 

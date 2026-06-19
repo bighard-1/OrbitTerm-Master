@@ -12,11 +12,19 @@ import (
 
 // AuthController 负责处理认证相关 HTTP 请求。
 type AuthController struct {
-	authService service.AuthService
+	authService    service.AuthService
+	recoveryPolicy service.RecoveryPolicyReader
 }
 
-func NewAuthController(authService service.AuthService) *AuthController {
-	return &AuthController{authService: authService}
+func NewAuthController(authService service.AuthService, recoveryPolicies ...service.RecoveryPolicyReader) *AuthController {
+	var recoveryPolicy service.RecoveryPolicyReader
+	if len(recoveryPolicies) > 0 {
+		recoveryPolicy = recoveryPolicies[0]
+	}
+	return &AuthController{
+		authService:    authService,
+		recoveryPolicy: recoveryPolicy,
+	}
 }
 
 // registerRequest 对应注册接口请求体。
@@ -162,4 +170,19 @@ func (c *AuthController) Refresh(ctx *gin.Context) {
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
 	})
+}
+
+func (c *AuthController) RecoveryInfo(ctx *gin.Context) {
+	if c.recoveryPolicy == nil {
+		policy := service.DefaultPublicRecoveryInfo()
+		common.Success(ctx, http.StatusOK, policy)
+		return
+	}
+
+	policy, err := c.recoveryPolicy.GetRecoveryPolicy()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "恢复策略读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, service.ToPublicRecoveryInfo(policy))
 }
