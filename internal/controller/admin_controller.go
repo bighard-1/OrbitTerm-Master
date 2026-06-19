@@ -655,6 +655,30 @@ func (c *AdminController) ForceLogout(ctx *gin.Context) {
 	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
 }
 
+func (c *AdminController) ForceLogoutRegularUsers(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+
+	result, err := c.userService.ForceLogoutRegularUsers(adminID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "普通用户全部下线失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, result)
+}
+
 func (c *AdminController) SoftDeleteUser(ctx *gin.Context) {
 	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
 	if !ok {

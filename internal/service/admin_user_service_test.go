@@ -126,6 +126,40 @@ func TestAdminUserServiceResetPasswordAndForceLogout(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceForceLogoutRegularUsers(t *testing.T) {
+	userRepo := newFakeUserRepo(
+		&model.User{ID: 2, Username: "alice", Role: model.UserRoleUser, Status: model.UserStatusNormal, TokenVersion: 1},
+		&model.User{ID: 3, Username: "bob", Role: model.UserRoleUser, Status: model.UserStatusNormal, TokenVersion: 7},
+		&model.User{ID: 4, Username: "admin", Role: model.UserRoleAdmin, Status: model.UserStatusNormal, TokenVersion: 10},
+	)
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+
+	result, err := svc.ForceLogoutRegularUsers(1, "疑似 Token 泄露，要求普通用户重新登录", AdminRequestMeta{IPAddress: "127.0.0.1"})
+	if err != nil {
+		t.Fatalf("ForceLogoutRegularUsers failed: %v", err)
+	}
+	if result.AffectedCount != 2 || result.Role != model.UserRoleUser {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	alice, _ := userRepo.FindByID(2)
+	bob, _ := userRepo.FindByID(3)
+	admin, _ := userRepo.FindByID(4)
+	if alice.TokenVersion != 2 || bob.TokenVersion != 8 {
+		t.Fatalf("regular users were not logged out: alice=%d bob=%d", alice.TokenVersion, bob.TokenVersion)
+	}
+	if admin.TokenVersion != 10 {
+		t.Fatalf("admin token version should not change, got %d", admin.TokenVersion)
+	}
+	if len(audit.entries) != 1 || audit.entries[0].Action != model.AuditActionUserBulkForceLogout {
+		t.Fatalf("unexpected audit entries: %+v", audit.entries)
+	}
+}
+
 func TestAdminUserServiceSoftDeleteAndRestore(t *testing.T) {
 	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
 	userRepo := newFakeUserRepo(&model.User{
@@ -367,6 +401,17 @@ func (r *fakeUserRepo) List(filter repository.UserListFilter) ([]model.User, int
 		users = append(users, *user)
 	}
 	return users, int64(len(users)), nil
+}
+
+func (r *fakeUserRepo) IncrementTokenVersionByRole(role string) (int64, error) {
+	var affected int64
+	for _, user := range r.users {
+		if user.Role == role {
+			user.TokenVersion++
+			affected++
+		}
+	}
+	return affected, nil
 }
 
 type fakeAdminAuditService struct {

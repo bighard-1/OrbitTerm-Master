@@ -74,6 +74,7 @@
         <article class="metric"><span>备份状态</span><strong id="metricBackup">--</strong></article>
         <article class="metric"><span>运行健康</span><strong id="metricRuntime">--</strong><small id="runtimeHint">等待检查</small></article>
         <article class="metric"><span>自动解封</span><strong id="metricAutoUnban">--</strong><small id="autoUnbanHint">等待检查</small></article>
+        <article class="metric"><span>Token 策略</span><strong id="metricTokenPolicy">--</strong><small id="tokenPolicyHint">等待检查</small></article>
         <article class="panel wide">
           <div class="panel-head"><h2>最近审计</h2><button class="ghost small" data-refresh="dashboard">刷新</button></div>
           <div id="recentAudits" class="list empty">登录后显示最近审计。</div>
@@ -102,6 +103,7 @@
             <option value="0">永久封禁</option>
           </select>
           <button id="scanExpiredBans" class="ghost">扫描到期封禁</button>
+          <button id="forceLogoutRegularUsers" class="danger">普通用户全部下线</button>
         </div>
         <div id="batchBar" class="batch-bar hidden">
           <span id="batchCount">已选择 0 个用户</span>

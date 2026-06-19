@@ -20,6 +20,7 @@ type UserRepository interface {
 	CountAll() (int64, error)
 	ListExpiredBans(now time.Time, limit int) ([]model.User, error)
 	List(filter UserListFilter) ([]model.User, int64, error)
+	IncrementTokenVersionByRole(role string) (int64, error)
 }
 
 type UserListFilter struct {
@@ -140,4 +141,11 @@ func (r *userRepository) List(filter UserListFilter) ([]model.User, int64, error
 		return nil, 0, err
 	}
 	return users, total, nil
+}
+
+func (r *userRepository) IncrementTokenVersionByRole(role string) (int64, error) {
+	result := r.db.Model(&model.User{}).
+		Where("role = ?", role).
+		UpdateColumn("token_version", gorm.Expr("token_version + ?", 1))
+	return result.RowsAffected, result.Error
 }

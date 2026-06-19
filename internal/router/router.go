@@ -110,6 +110,11 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.ScanExpiredBans,
 			)
+			adminGroup.POST(
+				"/users/force-logout-regular",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.ForceLogoutRegularUsers,
+			)
 			adminGroup.GET("/users/:id", adminController.GetUser)
 			adminGroup.POST(
 				"/users/:id/role",

@@ -292,6 +292,22 @@ curl -s -X POST "$ORBIT_API/api/v1/admin/users/用户ID/restore" \
   }'
 ```
 
+### 4.8.1 普通用户全部下线
+
+用于 JWT 泄漏、密钥轮换、异常登录事件后的应急处理。该接口只提升 `role=user` 普通用户的 `token_version`，不会影响 `super_admin`、`admin` 或 `support` 管理账号，避免管理员被锁在管理端之外。
+
+```bash
+curl -s -X POST "$ORBIT_API/api/v1/admin/users/force-logout-regular" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "疑似普通用户 Token 泄漏，要求重新登录",
+    "confirmation": "CONFIRM"
+  }'
+```
+
+返回 `affected_count` 表示本次失效旧 Token 的普通用户数量。
+
 ### 4.9 扫描并自动解封到期封禁
 
 ```bash

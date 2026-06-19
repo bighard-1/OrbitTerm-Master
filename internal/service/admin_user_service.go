@@ -31,6 +31,7 @@ type AdminUserService interface {
 	ScanExpiredBansBySystem(limit int, reason string) (*AdminExpiredBanScanResult, error)
 	CreateManagedUser(adminID uint, username, password, role, reason string, meta AdminRequestMeta) (*model.User, error)
 	UpdateUserRole(adminID, targetUserID uint, role, reason string, meta AdminRequestMeta) (*model.User, error)
+	ForceLogoutRegularUsers(adminID uint, reason string, meta AdminRequestMeta) (*AdminBulkForceLogoutResult, error)
 }
 
 type AdminUserListFilter struct {
@@ -56,6 +57,11 @@ type AdminExpiredBanItem struct {
 	UserID   uint   `json:"user_id"`
 	Username string `json:"username"`
 	Status   string `json:"status"`
+}
+
+type AdminBulkForceLogoutResult struct {
+	Role          string `json:"role"`
+	AffectedCount int64  `json:"affected_count"`
 }
 
 type adminUserService struct {
@@ -460,6 +466,37 @@ func (s *adminUserService) UpdateUserRole(adminID, targetUserID uint, role, reas
 	return user, nil
 }
 
+func (s *adminUserService) ForceLogoutRegularUsers(adminID uint, reason string, meta AdminRequestMeta) (*AdminBulkForceLogoutResult, error) {
+	if adminID == 0 {
+		return nil, ErrInvalidInput
+	}
+	reason = strings.TrimSpace(reason)
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
+	}
+
+	affected, err := s.userRepo.IncrementTokenVersionByRole(model.UserRoleUser)
+	if err != nil {
+		return nil, err
+	}
+	result := &AdminBulkForceLogoutResult{
+		Role:          model.UserRoleUser,
+		AffectedCount: affected,
+	}
+
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:   adminID,
+		Action:        model.AuditActionUserBulkForceLogout,
+		ResourceType:  "user",
+		ResourceID:    "role:" + model.UserRoleUser,
+		AfterSnapshot: bulkForceLogoutSnapshot(result),
+		IPAddress:     meta.IPAddress,
+		UserAgent:     meta.UserAgent,
+		Reason:        reason,
+	})
+	return result, nil
+}
+
 func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error) {
 	reason = strings.TrimSpace(reason)
 	if !validAdminReason(reason) {
@@ -541,6 +578,14 @@ func auditSnapshot(user *model.User) string {
 		"token_version":        user.TokenVersion,
 	}
 	data, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
+
+func bulkForceLogoutSnapshot(result *AdminBulkForceLogoutResult) string {
+	data, err := json.Marshal(result)
 	if err != nil {
 		return "{}"
 	}

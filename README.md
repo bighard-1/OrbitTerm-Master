@@ -102,6 +102,7 @@ OrbitTerm-Server
 - `POST /api/v1/admin/users/managed`
 - `POST /api/v1/admin/users/:id/role`
 - `POST /api/v1/admin/users/expired-bans/scan`
+- `POST /api/v1/admin/users/force-logout-regular`
 
 后端还内置到期封禁自动解封任务，可通过 `ADMIN_AUTO_UNBAN_ENABLED`、`ADMIN_AUTO_UNBAN_INTERVAL_MINUTES` 与 `ADMIN_AUTO_UNBAN_BATCH_LIMIT` 控制。
 

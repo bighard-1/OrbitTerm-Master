@@ -51,6 +51,8 @@ function clearSensitiveViews() {
 	$('runtimeHint').textContent = '等待检查';
 	$('metricAutoUnban').textContent = '--';
 	$('autoUnbanHint').textContent = '等待检查';
+	$('metricTokenPolicy').textContent = '--';
+	$('tokenPolicyHint').textContent = '等待检查';
 	['recentAudits', 'usersList', 'auditList', 'backupReport'].forEach(id => $(id).classList.add('empty'));
 	$('userDetail').classList.add('hidden');
 	$('userDetail').innerHTML = '';
@@ -121,6 +123,8 @@ function renderRuntimeStatus(runtime) {
   $('autoUnbanHint').textContent = runtime.auto_unban?.enabled
     ? `${runtime.auto_unban.effective_interval_minutes} 分钟/次 · 上限 ${runtime.auto_unban.effective_batch_limit}`
     : '未启用，到期封禁需手动扫描';
+  $('metricTokenPolicy').textContent = runtime.jwt?.secret_strength_status === 'strong' ? 'SAFE' : 'WEAK';
+  $('tokenPolicyHint').textContent = `Access ${runtime.jwt?.access_expire_minutes ?? '-'} 分钟 · Refresh ${runtime.jwt?.refresh_expire_days ?? '-'} 天`;
 }
 
 async function loadUsers() {
@@ -393,6 +397,18 @@ async function batchUserAction(action) {
   toast(failures.length ? `批量操作完成，失败 ${failures.length} 个：${failures.join('；')}` : '批量操作完成');
 }
 
+async function forceLogoutRegularUsers() {
+  const reason = promptReason('普通用户全部下线原因');
+  if (!reason) return;
+  if (!requireTypedConfirmation('普通用户全部下线')) return;
+  const result = await api('/api/v1/admin/users/force-logout-regular', {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmation: 'CONFIRM' })
+  });
+  toast(`普通用户旧 Token 已失效，影响 ${result.affected_count || 0} 个账号`);
+  await refresh('users');
+}
+
 async function runUserAction(userID, action, reason) {
   if (action === 'ban') {
     const minutes = Number($('banDuration').value || 0);
@@ -570,6 +586,7 @@ $('savePolicies').addEventListener('click', () => savePolicies().catch(err => to
 $('refreshBackup').addEventListener('click', () => loadBackup().catch(err => toast(err.message)));
 $('exportDiagnostics').addEventListener('click', () => exportDiagnostics().catch(err => toast(err.message)));
 $('scanExpiredBans').addEventListener('click', () => highRisk('/api/v1/admin/users/expired-bans/scan', { limit: 100, reason: promptReason('扫描原因') }));
+$('forceLogoutRegularUsers').addEventListener('click', () => forceLogoutRegularUsers().catch(err => toast(err.message)));
 $('batchBan').addEventListener('click', () => batchUserAction('ban').catch(err => toast(err.message)));
 $('batchUnban').addEventListener('click', () => batchUserAction('unban').catch(err => toast(err.message)));
 $('batchForceLogout').addEventListener('click', () => batchUserAction('forceLogout').catch(err => toast(err.message)));
