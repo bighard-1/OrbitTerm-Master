@@ -16,6 +16,8 @@ type UserRepository interface {
 	FindByUsername(username string) (*model.User, error)
 	FindByID(id uint) (*model.User, error)
 	CountByRoles(roles []string) (int64, error)
+	CountByStatus(status string) (int64, error)
+	CountAll() (int64, error)
 	ListExpiredBans(now time.Time, limit int) ([]model.User, error)
 	List(filter UserListFilter) ([]model.User, int64, error)
 }
@@ -76,6 +78,20 @@ func (r *userRepository) CountByRoles(roles []string) (int64, error) {
 	var count int64
 	err := r.db.Model(&model.User{}).Where("role IN ?", roles).Count(&count).Error
 	return count, err
+}
+
+func (r *userRepository) CountByStatus(status string) (int64, error) {
+	var count int64
+	query := r.db.Model(&model.User{})
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
+	err := query.Count(&count).Error
+	return count, err
+}
+
+func (r *userRepository) CountAll() (int64, error) {
+	return r.CountByStatus("")
 }
 
 func (r *userRepository) ListExpiredBans(now time.Time, limit int) ([]model.User, error) {

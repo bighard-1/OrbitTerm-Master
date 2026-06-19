@@ -267,6 +267,20 @@ func (r *fakeUserRepo) CountByRoles(roles []string) (int64, error) {
 	return count, nil
 }
 
+func (r *fakeUserRepo) CountByStatus(status string) (int64, error) {
+	var count int64
+	for _, user := range r.users {
+		if status == "" || user.Status == status {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (r *fakeUserRepo) CountAll() (int64, error) {
+	return r.CountByStatus("")
+}
+
 func (r *fakeUserRepo) ListExpiredBans(now time.Time, limit int) ([]model.User, error) {
 	users := make([]model.User, 0)
 	for _, user := range r.users {
@@ -290,6 +304,7 @@ func (r *fakeUserRepo) List(filter repository.UserListFilter) ([]model.User, int
 
 type fakeAdminAuditService struct {
 	entries []AdminAuditEntry
+	logs    []model.AdminAuditLog
 }
 
 func (s *fakeAdminAuditService) Record(entry AdminAuditEntry) error {
@@ -297,10 +312,13 @@ func (s *fakeAdminAuditService) Record(entry AdminAuditEntry) error {
 	return nil
 }
 
-func (s *fakeAdminAuditService) ListRecent(_ int) ([]model.AdminAuditLog, error) {
-	return nil, nil
+func (s *fakeAdminAuditService) ListRecent(limit int) ([]model.AdminAuditLog, error) {
+	if limit > 0 && len(s.logs) > limit {
+		return s.logs[:limit], nil
+	}
+	return s.logs, nil
 }
 
 func (s *fakeAdminAuditService) List(_ AdminAuditListFilter) ([]model.AdminAuditLog, int64, error) {
-	return nil, 0, nil
+	return s.logs, int64(len(s.logs)), nil
 }

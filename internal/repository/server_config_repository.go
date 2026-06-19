@@ -14,6 +14,7 @@ type ServerConfigRepository interface {
 	Update(config *model.ServerConfig) error
 	FindByIDAndUserID(id, userID uint) (*model.ServerConfig, error)
 	ListByUserID(userID uint) ([]model.ServerConfig, error)
+	CountAll() (int64, error)
 	DeleteByIDAndUserID(id, userID uint) (bool, error)
 }
 
@@ -52,6 +53,12 @@ func (r *serverConfigRepository) ListByUserID(userID uint) ([]model.ServerConfig
 		return nil, err
 	}
 	return configs, nil
+}
+
+func (r *serverConfigRepository) CountAll() (int64, error) {
+	var count int64
+	err := r.db.Model(&model.ServerConfig{}).Count(&count).Error
+	return count, err
 }
 
 func (r *serverConfigRepository) DeleteByIDAndUserID(id, userID uint) (bool, error) {

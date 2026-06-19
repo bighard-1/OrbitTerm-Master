@@ -58,6 +58,7 @@ func main() {
 	configRepo := repository.NewServerConfigRepository(db)
 	configService := service.NewConfigService(configRepo)
 	configController := controller.NewConfigController(configService)
+	adminDashboardService := service.NewAdminDashboardService(userRepo, configRepo, adminAuditService, backupReadinessService)
 
 	adminAuthService := service.NewAdminAuthService(userRepo, jwtManager, adminAuditService)
 	adminUserService := service.NewAdminUserService(userRepo, adminAuditService)
@@ -68,6 +69,7 @@ func main() {
 		securityPolicyService,
 		recoveryPolicyService,
 		backupReadinessService,
+		adminDashboardService,
 		cfg.AdminBootstrapToken,
 	)
 

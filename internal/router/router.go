@@ -51,6 +51,7 @@ func Register(
 		)
 		{
 			adminGroup.GET("/me", adminController.Me)
+			adminGroup.GET("/dashboard/overview", adminController.DashboardOverview)
 			adminGroup.GET("/audit-logs", adminController.AuditLogs)
 			adminGroup.GET("/system/security-policy", adminController.GetSecurityPolicy)
 			adminGroup.PUT(

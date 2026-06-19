@@ -22,6 +22,7 @@ type AdminController struct {
 	securityPolicy      service.SecurityPolicyService
 	recoveryPolicy      service.RecoveryPolicyService
 	backupReadiness     service.BackupReadinessService
+	dashboard           service.AdminDashboardService
 	adminBootstrapToken string
 }
 
@@ -32,6 +33,7 @@ func NewAdminController(
 	securityPolicy service.SecurityPolicyService,
 	recoveryPolicy service.RecoveryPolicyService,
 	backupReadiness service.BackupReadinessService,
+	dashboard service.AdminDashboardService,
 	adminBootstrapToken string,
 ) *AdminController {
 	return &AdminController{
@@ -41,6 +43,7 @@ func NewAdminController(
 		securityPolicy:      securityPolicy,
 		recoveryPolicy:      recoveryPolicy,
 		backupReadiness:     backupReadiness,
+		dashboard:           dashboard,
 		adminBootstrapToken: adminBootstrapToken,
 	}
 }
@@ -148,6 +151,25 @@ func (c *AdminController) AuditLogs(ctx *gin.Context) {
 		"limit":  limit,
 		"offset": offset,
 	})
+}
+
+func (c *AdminController) DashboardOverview(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	overview, err := c.dashboard.Overview(adminID, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "仪表盘数据读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, overview)
 }
 
 func (c *AdminController) GetSecurityPolicy(ctx *gin.Context) {
