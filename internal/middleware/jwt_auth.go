@@ -80,6 +80,7 @@ func JWTAuthMiddleware(jwtManager *utils.JWTManager, userRepo repository.UserRep
 
 		ctx.Set(ContextUserIDKey, claims.UserID)
 		ctx.Set(ContextUsernameKey, claims.Username)
+		ctx.Set(ContextUserRoleKey, user.Role)
 		ctx.Next()
 	}
 }

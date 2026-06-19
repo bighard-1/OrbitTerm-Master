@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 自动迁移核心模型。生产环境建议配合版本化迁移工具（如 golang-migrate）。
-	if err := db.AutoMigrate(&model.User{}, &model.ServerConfig{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ServerConfig{}, &model.AdminAuditLog{}); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
@@ -53,9 +53,13 @@ func main() {
 	configService := service.NewConfigService(configRepo)
 	configController := controller.NewConfigController(configService)
 
+	adminAuditRepo := repository.NewAdminAuditRepository(db)
+	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
+	adminController := controller.NewAdminController(adminAuditService)
+
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()
-	router.Register(engine, authController, configController, jwtManager, userRepo)
+	router.Register(engine, authController, configController, adminController, jwtManager, userRepo)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)
 	if err := engine.Run(":" + cfg.ServerPort); err != nil {

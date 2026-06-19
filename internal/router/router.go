@@ -14,6 +14,7 @@ func Register(
 	engine *gin.Engine,
 	authController *controller.AuthController,
 	configController *controller.ConfigController,
+	adminController *controller.AdminController,
 	jwtManager *utils.JWTManager,
 	userRepo repository.UserRepository,
 ) {
@@ -32,6 +33,16 @@ func Register(
 			configGroup.POST("/upload", configController.Upload)
 			configGroup.GET("/pull", configController.Pull)
 			configGroup.DELETE("/:id", configController.Delete)
+		}
+
+		adminGroup := v1.Group("/admin")
+		adminGroup.Use(
+			middleware.JWTAuthMiddleware(jwtManager, userRepo),
+			middleware.RequireAdminRole(),
+		)
+		{
+			adminGroup.GET("/me", adminController.Me)
+			adminGroup.GET("/audit-logs", adminController.AuditLogs)
 		}
 	}
 }
