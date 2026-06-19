@@ -456,11 +456,22 @@ async function exportAudit() {
   if ($('auditAction').value.trim()) params.set('action', $('auditAction').value.trim());
   if ($('auditTarget').value.trim()) params.set('target_user_id', $('auditTarget').value.trim());
   const data = await api(`/api/v1/admin/audit-logs?${params}`);
+  downloadJSON(data, `orbitterm-audit-${new Date().toISOString().slice(0, 10)}.json`);
+}
+
+async function exportDiagnostics() {
+  if (!state.token) return;
+  const data = await api('/api/v1/admin/system/diagnostics');
+  downloadJSON(data, `orbitterm-diagnostics-${new Date().toISOString().slice(0, 10)}.json`);
+  toast('诊断包已导出，敏感密钥已脱敏');
+}
+
+function downloadJSON(data, filename) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.download = `orbitterm-audit-${new Date().toISOString().slice(0, 10)}.json`;
+  link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -507,6 +518,7 @@ $('bootstrapButton').addEventListener('click', () => bootstrap().catch(err => to
 $('logoutButton').addEventListener('click', () => { setAuth(''); hideUserDetail(); toast('已退出'); });
 $('savePolicies').addEventListener('click', () => savePolicies().catch(err => toast(err.message)));
 $('refreshBackup').addEventListener('click', () => loadBackup().catch(err => toast(err.message)));
+$('exportDiagnostics').addEventListener('click', () => exportDiagnostics().catch(err => toast(err.message)));
 $('scanExpiredBans').addEventListener('click', () => highRisk('/api/v1/admin/users/expired-bans/scan', { limit: 100, reason: promptReason('扫描原因') }));
 $('batchBan').addEventListener('click', () => batchUserAction('ban').catch(err => toast(err.message)));
 $('batchUnban').addEventListener('click', () => batchUserAction('unban').catch(err => toast(err.message)));

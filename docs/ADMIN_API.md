@@ -351,7 +351,30 @@ curl -s "$ORBIT_API/api/v1/admin/system/backup-readiness" \
 - 该接口不会返回 `JWT_SECRET`、数据库密码等明文。
 - 真正的数据库备份建议使用 1Panel PostgreSQL 备份或容器内 `pg_dump`。
 
-## 8. 审计日志
+## 8. 诊断包导出
+
+```bash
+curl -s "$ORBIT_API/api/v1/admin/system/diagnostics" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -o orbitterm-diagnostics.json
+```
+
+返回内容包含：
+
+- `runtime`：Go 版本、系统架构、Gin 模式。
+- `backup_readiness`：数据库可读性、关键表计数、脱敏环境变量检查。
+- `recent_audit_summary`：最近 20 条审计摘要。
+- `redaction_policy`：诊断包脱敏规则说明。
+
+该接口会写入 `system_diagnostics_export` 审计记录。
+
+安全说明：
+
+- 不返回 `JWT_SECRET`、数据库密码、`ADMIN_BOOTSTRAP_TOKEN` 原文。
+- 不返回用户主密码、主密码派生密钥、服务器密码、私钥或资产明文。
+- 审计摘要只标记快照是否存在，不导出快照正文。
+
+## 9. 审计日志
 
 ```bash
 curl -s "$ORBIT_API/api/v1/admin/audit-logs?limit=50&offset=0" \
@@ -372,7 +395,7 @@ curl -s "$ORBIT_API/api/v1/admin/audit-logs?target_user_id=用户ID&limit=50" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
-## 9. 角色权限速查
+## 10. 角色权限速查
 
 | 角色 | 可查看 | 可操作 |
 | --- | --- | --- |
@@ -381,7 +404,7 @@ curl -s "$ORBIT_API/api/v1/admin/audit-logs?target_user_id=用户ID&limit=50" \
 | `support` | 用户列表、审计、策略查看 | 不可执行高危操作 |
 | `user` | 普通客户端接口 | 无管理端权限 |
 
-## 10. 常见错误
+## 11. 常见错误
 
 ### 管理端已初始化
 

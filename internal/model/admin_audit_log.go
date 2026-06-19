@@ -7,6 +7,7 @@ const (
 	AuditActionAdminLogin                = "admin_login"
 	AuditActionAdminMe                   = "admin_me"
 	AuditActionSystemBackupReadinessView = "system_backup_readiness_view"
+	AuditActionSystemDiagnosticsExport   = "system_diagnostics_export"
 	AuditActionUserBan                   = "user_ban"
 	AuditActionUserAutoUnban             = "user_auto_unban"
 	AuditActionUserUnban                 = "user_unban"

@@ -172,7 +172,7 @@ OrbitTerm 后端采用零知识同步模型：
    - 脱敏环境变量快照：记录 `JWT_SECRET`、`DATABASE_URL`、`JWT_ISSUER` 等变量是否配置，但不要把密钥原文写入普通文档。
    - 后端镜像版本号/tag/digest。
    - 1Panel 反向代理、域名、HTTPS 证书配置。
-5. 管理端可调用 `GET /api/v1/admin/system/backup-readiness` 查看备份就绪状态和环境变量脱敏检查结果。
+5. 管理端可调用 `GET /api/v1/admin/system/backup-readiness` 查看备份就绪状态和环境变量脱敏检查结果，也可调用 `GET /api/v1/admin/system/diagnostics` 导出脱敏诊断包。
 
 ## 7. 升级与回滚
 
@@ -198,5 +198,5 @@ OrbitTerm 后端采用零知识同步模型：
 3. `POST /api/v1/auth/register` 正常。
 4. `POST /api/v1/auth/login` 可返回 JWT。
 5. 带 Bearer Token 调用 `/api/v1/config/upload` 正常。
-6. 管理端调用 `/api/v1/admin/system/backup-readiness` 可返回脱敏环境检查结果。
+6. 管理端调用 `/api/v1/admin/system/backup-readiness` 可返回脱敏环境检查结果；排障时可调用 `/api/v1/admin/system/diagnostics` 导出脱敏诊断包。
 7. 管理端高危操作必须填写原因，并传入 `confirmation=CONFIRM`，否则后端会拒绝执行。

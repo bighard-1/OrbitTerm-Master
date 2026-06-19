@@ -76,6 +76,11 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.BackupReadiness,
 			)
+			adminGroup.GET(
+				"/system/diagnostics",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.Diagnostics,
+			)
 			adminGroup.GET("/users", adminController.ListUsers)
 			adminGroup.POST(
 				"/users/managed",

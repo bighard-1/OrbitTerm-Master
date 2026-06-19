@@ -145,7 +145,10 @@
       <section id="backupView" class="panel hidden">
         <div class="panel-head">
           <div><h2>备份自检</h2><p>检查数据库关键表、环境变量脱敏状态与 1Panel 备份注意事项。</p></div>
-          <button id="refreshBackup" class="ghost small">重新检查</button>
+          <div class="actions">
+            <button id="exportDiagnostics" class="ghost small">导出诊断包</button>
+            <button id="refreshBackup" class="ghost small">重新检查</button>
+          </div>
         </div>
         <div id="backupReport" class="backup-grid empty">登录后可执行备份就绪检查。</div>
       </section>

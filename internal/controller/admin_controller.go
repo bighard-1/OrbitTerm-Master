@@ -4,8 +4,10 @@ import (
 	"crypto/subtle"
 	"errors"
 	"net/http"
+	"runtime"
 	"strconv"
 	"strings"
+	"time"
 
 	"orbitterm-server/internal/common"
 	"orbitterm-server/internal/middleware"
@@ -256,6 +258,82 @@ func (c *AdminController) BackupReadiness(ctx *gin.Context) {
 		common.Error(ctx, http.StatusInternalServerError, "备份自检失败")
 		return
 	}
+	common.Success(ctx, http.StatusOK, report)
+}
+
+func (c *AdminController) Diagnostics(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	meta := requestMeta(ctx)
+	backup, err := c.backupReadiness.GetReadiness(adminID, meta)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "诊断包生成失败")
+		return
+	}
+
+	recentAudits, err := c.auditService.ListRecent(20)
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "诊断包审计摘要读取失败")
+		return
+	}
+
+	auditSummary := make([]gin.H, 0, len(recentAudits))
+	for _, log := range recentAudits {
+		auditSummary = append(auditSummary, gin.H{
+			"id":              log.ID,
+			"admin_user_id":   log.AdminUserID,
+			"target_user_id":  log.TargetUserID,
+			"action":          log.Action,
+			"resource_type":   log.ResourceType,
+			"resource_id":     log.ResourceID,
+			"created_at":      log.CreatedAt,
+			"reason_present":  strings.TrimSpace(log.Reason) != "",
+			"snapshot_fields": snapshotPresence(log.BeforeSnapshot, log.AfterSnapshot),
+		})
+	}
+
+	report := gin.H{
+		"generated_at": time.Now().UTC(),
+		"runtime": gin.H{
+			"go_version": runtime.Version(),
+			"go_os":      runtime.GOOS,
+			"go_arch":    runtime.GOARCH,
+			"gin_mode":   gin.Mode(),
+		},
+		"backup_readiness": backup,
+		"recent_audit_summary": gin.H{
+			"limit": 20,
+			"items": auditSummary,
+		},
+		"redaction_policy": []string{
+			"诊断包不包含 JWT_SECRET、Refresh Token、数据库密码、ADMIN_BOOTSTRAP_TOKEN 原文。",
+			"诊断包不包含用户主密码、主密码派生密钥、服务器密码、私钥或加密资产明文。",
+			"环境变量仅输出是否配置、强度判断与脱敏值。",
+		},
+		"operator_next_steps": []string{
+			"若 backup_readiness.ready 为 false，优先处理 warnings 中的配置或数据库问题。",
+			"生产环境请将完整密钥保存在独立密码库，诊断包只适合提交给开发/运维定位问题。",
+			"导出诊断包后可同时导出审计日志 JSON，交叉排查具体管理员操作。",
+		},
+	}
+
+	_ = c.auditService.Record(service.AdminAuditEntry{
+		AdminUserID:  adminID,
+		Action:       model.AuditActionSystemDiagnosticsExport,
+		ResourceType: "system",
+		ResourceID:   "diagnostics",
+		IPAddress:    meta.IPAddress,
+		UserAgent:    meta.UserAgent,
+	})
+
 	common.Success(ctx, http.StatusOK, report)
 }
 
@@ -644,6 +722,13 @@ func requestMeta(ctx *gin.Context) service.AdminRequestMeta {
 	return service.AdminRequestMeta{
 		IPAddress: ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
+	}
+}
+
+func snapshotPresence(before, after string) gin.H {
+	return gin.H{
+		"before": strings.TrimSpace(before) != "",
+		"after":  strings.TrimSpace(after) != "",
 	}
 }
 
