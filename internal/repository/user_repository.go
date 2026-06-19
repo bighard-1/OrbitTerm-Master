@@ -11,6 +11,7 @@ import (
 // UserRepository 封装用户数据访问逻辑，避免业务层直接依赖 ORM 细节。
 type UserRepository interface {
 	Create(user *model.User) error
+	Save(user *model.User) error
 	FindByUsername(username string) (*model.User, error)
 	FindByID(id uint) (*model.User, error)
 }
@@ -25,6 +26,10 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 
 func (r *userRepository) Create(user *model.User) error {
 	return r.db.Create(user).Error
+}
+
+func (r *userRepository) Save(user *model.User) error {
+	return r.db.Save(user).Error
 }
 
 func (r *userRepository) FindByUsername(username string) (*model.User, error) {

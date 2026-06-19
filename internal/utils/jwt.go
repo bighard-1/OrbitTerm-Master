@@ -18,9 +18,10 @@ type JWTManager struct {
 
 // CustomClaims 是 OrbitTerm 使用的 JWT 声明。
 type CustomClaims struct {
-	UserID    uint   `json:"uid"`
-	Username  string `json:"username"`
-	TokenType string `json:"typ"`
+	UserID       uint   `json:"uid"`
+	Username     string `json:"username"`
+	TokenType    string `json:"typ"`
+	TokenVersion int64  `json:"token_version"`
 	jwt.RegisteredClaims
 }
 
@@ -50,15 +51,17 @@ func NewJWTManager(secret, issuer string, accessExpireMinutes, refreshExpireDays
 }
 
 // GenerateTokenPair 为指定用户生成 access + refresh 双令牌。
-func (m *JWTManager) GenerateTokenPair(userID uint, username string) (*TokenPair, error) {
+// TokenVersion 会写入令牌，便于管理端后续实现强制下线和重置密码后失效旧 Token。
+func (m *JWTManager) GenerateTokenPair(userID uint, username string, tokenVersion int64) (*TokenPair, error) {
 	now := time.Now().UTC()
 	accessExpiresAt := now.Add(time.Duration(m.accessExpireMinutes) * time.Minute)
 	refreshExpiresAt := now.Add(time.Duration(m.refreshExpireDays) * 24 * time.Hour)
 
 	accessClaims := CustomClaims{
-		UserID:    userID,
-		Username:  username,
-		TokenType: "access",
+		UserID:       userID,
+		Username:     username,
+		TokenType:    "access",
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    m.issuer,
 			IssuedAt:  jwt.NewNumericDate(now),
@@ -68,9 +71,10 @@ func (m *JWTManager) GenerateTokenPair(userID uint, username string) (*TokenPair
 	}
 
 	refreshClaims := CustomClaims{
-		UserID:    userID,
-		Username:  username,
-		TokenType: "refresh",
+		UserID:       userID,
+		Username:     username,
+		TokenType:    "refresh",
+		TokenVersion: tokenVersion,
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    m.issuer,
 			IssuedAt:  jwt.NewNumericDate(now),

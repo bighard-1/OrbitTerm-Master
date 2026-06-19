@@ -98,6 +98,10 @@ func (c *AuthController) Login(ctx *gin.Context) {
 			common.Error(ctx, http.StatusBadRequest, "用户名和密码不能为空")
 		case errors.Is(err, service.ErrInvalidCredential):
 			common.Error(ctx, http.StatusUnauthorized, "用户名或密码错误")
+		case errors.Is(err, service.ErrAccountBanned):
+			common.Error(ctx, http.StatusForbidden, "账号已被封禁，请联系管理员")
+		case errors.Is(err, service.ErrAccountDeleted):
+			common.Error(ctx, http.StatusForbidden, "账号已注销")
 		default:
 			common.Error(ctx, http.StatusInternalServerError, "登录失败")
 		}
@@ -139,6 +143,10 @@ func (c *AuthController) Refresh(ctx *gin.Context) {
 			common.Error(ctx, http.StatusBadRequest, "refresh_token 不能为空")
 		case errors.Is(err, service.ErrInvalidCredential):
 			common.Error(ctx, http.StatusUnauthorized, "refresh token 无效或已过期")
+		case errors.Is(err, service.ErrAccountBanned):
+			common.Error(ctx, http.StatusForbidden, "账号已被封禁，请联系管理员")
+		case errors.Is(err, service.ErrAccountDeleted):
+			common.Error(ctx, http.StatusForbidden, "账号已注销")
 		default:
 			common.Error(ctx, http.StatusInternalServerError, "刷新令牌失败")
 		}

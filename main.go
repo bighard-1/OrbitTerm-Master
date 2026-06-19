@@ -55,7 +55,7 @@ func main() {
 
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()
-	router.Register(engine, authController, configController, jwtManager)
+	router.Register(engine, authController, configController, jwtManager, userRepo)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)
 	if err := engine.Run(":" + cfg.ServerPort); err != nil {

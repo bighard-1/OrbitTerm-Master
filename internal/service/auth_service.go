@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"strings"
+	"time"
 
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
@@ -13,6 +14,8 @@ var (
 	ErrInvalidInput      = errors.New("输入参数不合法")
 	ErrUserAlreadyExists = errors.New("用户名已存在")
 	ErrInvalidCredential = errors.New("用户名或密码错误")
+	ErrAccountBanned     = errors.New("账号已被封禁")
+	ErrAccountDeleted    = errors.New("账号已注销")
 )
 
 // AuthService 提供身份认证相关业务逻辑。
@@ -61,6 +64,8 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 	user := &model.User{
 		Username:     username,
 		PasswordHash: hashed,
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusNormal,
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
@@ -85,6 +90,9 @@ func (s *authService) Login(username, password string) (*utils.TokenPair, error)
 	if user == nil {
 		return nil, ErrInvalidCredential
 	}
+	if err := s.ensureUserCanAuthenticate(user); err != nil {
+		return nil, err
+	}
 
 	matched, err := utils.VerifyPasswordArgon2ID(password, user.PasswordHash)
 	if err != nil {
@@ -94,7 +102,7 @@ func (s *authService) Login(username, password string) (*utils.TokenPair, error)
 		return nil, ErrInvalidCredential
 	}
 
-	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username)
+	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion)
 	if err != nil {
 		return nil, err
 	}
@@ -119,10 +127,32 @@ func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 	if user == nil || user.Username != claims.Username {
 		return nil, ErrInvalidCredential
 	}
+	if claims.TokenVersion != user.TokenVersion {
+		return nil, ErrInvalidCredential
+	}
+	if err := s.ensureUserCanAuthenticate(user); err != nil {
+		return nil, err
+	}
 
-	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username)
+	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion)
 	if err != nil {
 		return nil, err
 	}
 	return pair, nil
+}
+
+func (s *authService) ensureUserCanAuthenticate(user *model.User) error {
+	now := time.Now().UTC()
+	if user.ClearExpiredBan(now) {
+		if err := s.userRepo.Save(user); err != nil {
+			return err
+		}
+	}
+	if user.IsDeleted {
+		return ErrAccountDeleted
+	}
+	if user.IsBanned {
+		return ErrAccountBanned
+	}
+	return nil
 }

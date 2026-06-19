@@ -3,6 +3,7 @@ package router
 import (
 	"orbitterm-server/internal/controller"
 	"orbitterm-server/internal/middleware"
+	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
 
 	"github.com/gin-gonic/gin"
@@ -14,6 +15,7 @@ func Register(
 	authController *controller.AuthController,
 	configController *controller.ConfigController,
 	jwtManager *utils.JWTManager,
+	userRepo repository.UserRepository,
 ) {
 	v1 := engine.Group("/api/v1")
 	{
@@ -25,7 +27,7 @@ func Register(
 		}
 
 		configGroup := v1.Group("/config")
-		configGroup.Use(middleware.JWTAuthMiddleware(jwtManager))
+		configGroup.Use(middleware.JWTAuthMiddleware(jwtManager, userRepo))
 		{
 			configGroup.POST("/upload", configController.Upload)
 			configGroup.GET("/pull", configController.Pull)
