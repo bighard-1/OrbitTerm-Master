@@ -1,6 +1,7 @@
 package router
 
 import (
+	"orbitterm-server/internal/adminweb"
 	"orbitterm-server/internal/controller"
 	"orbitterm-server/internal/middleware"
 	"orbitterm-server/internal/model"
@@ -19,6 +20,8 @@ func Register(
 	jwtManager *utils.JWTManager,
 	userRepo repository.UserRepository,
 ) {
+	adminweb.Register(engine)
+
 	v1 := engine.Group("/api/v1")
 	{
 		auth := v1.Group("/auth")

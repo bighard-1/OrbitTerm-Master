@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>OrbitTerm Admin Console</title>
+  <link rel="stylesheet" href="/admin-console/assets/styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="logo">O</div>
+        <div>
+          <strong>OrbitTerm</strong>
+          <span>Admin Console</span>
+        </div>
+      </div>
+      <nav class="nav" aria-label="管理端导航">
+        <button class="nav-item active" data-view="dashboard">仪表盘</button>
+        <button class="nav-item" data-view="users">用户治理</button>
+        <button class="nav-item" data-view="policies">系统策略</button>
+        <button class="nav-item" data-view="audit">审计日志</button>
+      </nav>
+      <div class="sidebar-foot">
+        <span id="apiBaseLabel">API: 当前域名</span>
+        <button id="logoutButton" class="ghost small">退出</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">OrbitTerm 后端管理端</p>
+          <h1 id="pageTitle">仪表盘</h1>
+        </div>
+        <div class="status-pill" id="statusPill">未登录</div>
+      </header>
+
+      <section id="bootstrapPanel" class="panel hidden">
+        <div class="panel-head">
+          <div>
+            <h2>首次初始化</h2>
+            <p>当前没有管理员，请创建第一个 super_admin。</p>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label>初始化令牌<input id="bootstrapToken" type="password" placeholder="ADMIN_BOOTSTRAP_TOKEN" /></label>
+          <label>管理员账号<input id="bootstrapUsername" type="text" placeholder="admin@example.com" /></label>
+          <label>管理员密码<input id="bootstrapPassword" type="password" placeholder="至少 12 位" /></label>
+          <button id="bootstrapButton" class="primary">创建 super_admin</button>
+        </div>
+      </section>
+
+      <section id="loginPanel" class="panel">
+        <div class="panel-head">
+          <div>
+            <h2>管理员登录</h2>
+            <p>使用 super_admin、admin 或 support 账号登录。</p>
+          </div>
+        </div>
+        <div class="form-grid two">
+          <label>账号<input id="loginUsername" type="text" autocomplete="username" /></label>
+          <label>密码<input id="loginPassword" type="password" autocomplete="current-password" /></label>
+          <button id="loginButton" class="primary">登录</button>
+        </div>
+      </section>
+
+      <section id="dashboardView" class="view-grid">
+        <article class="metric"><span>用户总数</span><strong id="metricUsers">--</strong></article>
+        <article class="metric"><span>封禁用户</span><strong id="metricBanned">--</strong></article>
+        <article class="metric"><span>云端配置</span><strong id="metricConfigs">--</strong></article>
+        <article class="metric"><span>备份状态</span><strong id="metricBackup">--</strong></article>
+        <article class="panel wide">
+          <div class="panel-head"><h2>最近审计</h2><button class="ghost small" data-refresh="dashboard">刷新</button></div>
+          <div id="recentAudits" class="list empty">登录后显示最近审计。</div>
+        </article>
+      </section>
+
+      <section id="usersView" class="panel hidden">
+        <div class="panel-head">
+          <div><h2>用户治理</h2><p>支持筛选、封禁、解封、强制下线与重置登录密码。</p></div>
+          <button class="ghost small" data-refresh="users">刷新</button>
+        </div>
+        <div class="toolbar">
+          <input id="userSearch" placeholder="搜索用户名" />
+          <select id="userStatus">
+            <option value="">全部状态</option>
+            <option value="normal">normal</option>
+            <option value="risk">risk</option>
+            <option value="banned">banned</option>
+            <option value="deleted">deleted</option>
+          </select>
+          <button id="scanExpiredBans" class="ghost">扫描到期封禁</button>
+        </div>
+        <div id="usersList" class="list empty">暂无数据。</div>
+      </section>
+
+      <section id="policiesView" class="panel hidden">
+        <div class="panel-head">
+          <div><h2>系统策略</h2><p>控制注册开关、密码长度与用户端恢复提示。</p></div>
+          <button class="ghost small" data-refresh="policies">刷新</button>
+        </div>
+        <div class="form-grid two">
+          <label class="check"><input id="registrationEnabled" type="checkbox" /> 允许新用户注册</label>
+          <label>最小密码长度<input id="minPasswordLength" type="number" min="8" max="128" /></label>
+          <label>注册关闭原因<input id="registrationReason" type="text" /></label>
+          <label>支持联系方式<input id="supportContact" type="text" /></label>
+          <label class="wide-field">恢复提示<textarea id="recoveryMessage" rows="4"></textarea></label>
+          <button id="savePolicies" class="primary">保存策略</button>
+        </div>
+      </section>
+
+      <section id="auditView" class="panel hidden">
+        <div class="panel-head">
+          <div><h2>审计日志</h2><p>查看管理员敏感操作记录。</p></div>
+          <button class="ghost small" data-refresh="audit">刷新</button>
+        </div>
+        <div class="toolbar">
+          <input id="auditAction" placeholder="action" />
+          <input id="auditTarget" placeholder="target_user_id" />
+        </div>
+        <div id="auditList" class="list empty">暂无数据。</div>
+      </section>
+
+      <div id="toast" class="toast hidden"></div>
+    </main>
+  </div>
+  <script src="/admin-console/assets/app.js"></script>
+</body>
+</html>
