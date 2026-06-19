@@ -35,6 +35,7 @@ services:
       JWT_ISSUER: "orbitterm-server"
       JWT_ACCESS_EXPIRE_MINUTES: "15"
       JWT_REFRESH_EXPIRE_DAYS: "30"
+      ADMIN_BOOTSTRAP_TOKEN: "replace-with-strong-admin-bootstrap-token"
     ports:
       - "8080:8080"
 

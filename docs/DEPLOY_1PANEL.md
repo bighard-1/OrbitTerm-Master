@@ -78,6 +78,7 @@ services:
       JWT_ISSUER: "orbitterm-server"
       JWT_ACCESS_EXPIRE_MINUTES: "15"
       JWT_REFRESH_EXPIRE_DAYS: "30"
+      ADMIN_BOOTSTRAP_TOKEN: "ReplaceWithLongRandomAdminBootstrapToken"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -119,6 +120,11 @@ volumes:
 6. `JWT_REFRESH_EXPIRE_DAYS`
    - 示例：`30`
    - 说明：Refresh Token 过期时间（天）。
+
+7. `ADMIN_BOOTSTRAP_TOKEN`
+   - 示例：`ReplaceWithLongRandomAdminBootstrapToken`
+   - 说明：首次创建管理端 `super_admin` 时必须在请求头 `X-Orbit-Admin-Bootstrap-Token` 中携带该值。
+   - 注意：这不是管理员登录密码，只是一次性初始化防护令牌；创建首个管理员后仍建议轮换或清空该环境变量并重启后端。
 
 数据库容器变量（`orbit-db`）：
 

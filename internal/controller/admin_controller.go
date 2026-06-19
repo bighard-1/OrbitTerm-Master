@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/subtle"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,15 +15,77 @@ import (
 )
 
 type AdminController struct {
-	auditService service.AdminAuditService
-	userService  service.AdminUserService
+	auditService        service.AdminAuditService
+	userService         service.AdminUserService
+	adminAuthService    service.AdminAuthService
+	adminBootstrapToken string
 }
 
-func NewAdminController(auditService service.AdminAuditService, userService service.AdminUserService) *AdminController {
+func NewAdminController(
+	auditService service.AdminAuditService,
+	userService service.AdminUserService,
+	adminAuthService service.AdminAuthService,
+	adminBootstrapToken string,
+) *AdminController {
 	return &AdminController{
-		auditService: auditService,
-		userService:  userService,
+		auditService:        auditService,
+		userService:         userService,
+		adminAuthService:    adminAuthService,
+		adminBootstrapToken: adminBootstrapToken,
 	}
+}
+
+func (c *AdminController) BootstrapStatus(ctx *gin.Context) {
+	status, err := c.adminAuthService.BootstrapStatus()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "管理端初始化状态读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, status)
+}
+
+type bootstrapSuperAdminRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+func (c *AdminController) BootstrapSuperAdmin(ctx *gin.Context) {
+	if !c.validateBootstrapToken(ctx) {
+		return
+	}
+
+	var req bootstrapSuperAdminRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	user, err := c.adminAuthService.BootstrapSuperAdmin(req.Username, req.Password, requestMeta(ctx))
+	if err != nil {
+		writeAdminAuthError(ctx, err, "首个管理员创建失败")
+		return
+	}
+	common.Success(ctx, http.StatusCreated, toAdminUserResponse(user))
+}
+
+type adminLoginRequest struct {
+	Username string `json:"username" binding:"required"`
+	Password string `json:"password" binding:"required"`
+}
+
+func (c *AdminController) Login(ctx *gin.Context) {
+	var req adminLoginRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	pair, err := c.adminAuthService.Login(req.Username, req.Password, requestMeta(ctx))
+	if err != nil {
+		writeAdminAuthError(ctx, err, "管理员登录失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, pair)
 }
 
 func (c *AdminController) Me(ctx *gin.Context) {
@@ -315,6 +378,41 @@ func requestMeta(ctx *gin.Context) service.AdminRequestMeta {
 	return service.AdminRequestMeta{
 		IPAddress: ctx.ClientIP(),
 		UserAgent: ctx.Request.UserAgent(),
+	}
+}
+
+func (c *AdminController) validateBootstrapToken(ctx *gin.Context) bool {
+	if c.adminBootstrapToken == "" {
+		common.Error(ctx, http.StatusServiceUnavailable, "管理员初始化令牌未配置")
+		return false
+	}
+
+	token := ctx.GetHeader("X-Orbit-Admin-Bootstrap-Token")
+	if subtle.ConstantTimeCompare([]byte(token), []byte(c.adminBootstrapToken)) != 1 {
+		common.Error(ctx, http.StatusForbidden, "管理员初始化令牌无效")
+		return false
+	}
+	return true
+}
+
+func writeAdminAuthError(ctx *gin.Context, err error, fallback string) {
+	switch {
+	case errors.Is(err, service.ErrInvalidInput):
+		common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+	case errors.Is(err, service.ErrUserAlreadyExists):
+		common.Error(ctx, http.StatusConflict, "用户名已存在")
+	case errors.Is(err, service.ErrAdminAlreadyInitialized):
+		common.Error(ctx, http.StatusConflict, "管理端已初始化")
+	case errors.Is(err, service.ErrInvalidCredential):
+		common.Error(ctx, http.StatusUnauthorized, "用户名或密码错误")
+	case errors.Is(err, service.ErrAdminPermissionDenied):
+		common.Error(ctx, http.StatusForbidden, "该账号无管理端权限")
+	case errors.Is(err, service.ErrAccountBanned):
+		common.Error(ctx, http.StatusForbidden, "账号已被封禁")
+	case errors.Is(err, service.ErrAccountDeleted):
+		common.Error(ctx, http.StatusForbidden, "账号已注销")
+	default:
+		common.Error(ctx, http.StatusInternalServerError, fallback)
 	}
 }
 

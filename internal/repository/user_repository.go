@@ -14,6 +14,7 @@ type UserRepository interface {
 	Save(user *model.User) error
 	FindByUsername(username string) (*model.User, error)
 	FindByID(id uint) (*model.User, error)
+	CountByRoles(roles []string) (int64, error)
 	List(filter UserListFilter) ([]model.User, int64, error)
 }
 
@@ -63,6 +64,16 @@ func (r *userRepository) FindByID(id uint) (*model.User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *userRepository) CountByRoles(roles []string) (int64, error) {
+	if len(roles) == 0 {
+		return 0, nil
+	}
+
+	var count int64
+	err := r.db.Model(&model.User{}).Where("role IN ?", roles).Count(&count).Error
+	return count, err
 }
 
 func (r *userRepository) List(filter UserListFilter) ([]model.User, int64, error) {

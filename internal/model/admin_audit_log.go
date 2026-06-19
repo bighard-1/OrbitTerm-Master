@@ -3,6 +3,8 @@ package model
 import "time"
 
 const (
+	AuditActionAdminBootstrap    = "admin_bootstrap"
+	AuditActionAdminLogin        = "admin_login"
 	AuditActionAdminMe           = "admin_me"
 	AuditActionUserBan           = "user_ban"
 	AuditActionUserUnban         = "user_unban"

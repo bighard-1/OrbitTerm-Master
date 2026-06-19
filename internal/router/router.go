@@ -36,6 +36,13 @@ func Register(
 			configGroup.DELETE("/:id", configController.Delete)
 		}
 
+		adminPublic := v1.Group("/admin")
+		{
+			adminPublic.GET("/bootstrap/status", adminController.BootstrapStatus)
+			adminPublic.POST("/bootstrap/super-admin", adminController.BootstrapSuperAdmin)
+			adminPublic.POST("/auth/login", adminController.Login)
+		}
+
 		adminGroup := v1.Group("/admin")
 		adminGroup.Use(
 			middleware.JWTAuthMiddleware(jwtManager, userRepo),

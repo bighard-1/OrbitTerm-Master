@@ -55,6 +55,7 @@ OrbitTerm-Server
 - `JWT_ACCESS_EXPIRE_MINUTES`（默认 `15`）
 - `JWT_REFRESH_EXPIRE_DAYS`（默认 `30`）
 - `JWT_EXPIRE_HOURS`（兼容旧配置，未设置新变量时回退）
+- `ADMIN_BOOTSTRAP_TOKEN`（无默认值；用于首次创建 `super_admin`，生产必须配置高强度随机值）
 
 ## 四、接口
 

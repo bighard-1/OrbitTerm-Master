@@ -21,6 +21,7 @@ type Config struct {
 	JWTExpireHours         int
 	JWTAccessExpireMinutes int
 	JWTRefreshExpireDays   int
+	AdminBootstrapToken    string
 }
 
 // Load 从环境变量读取配置并设置默认值。
@@ -34,6 +35,7 @@ func Load() Config {
 		JWTExpireHours:         getEnvAsInt("JWT_EXPIRE_HOURS", 24),
 		JWTAccessExpireMinutes: getEnvAsInt("JWT_ACCESS_EXPIRE_MINUTES", 15),
 		JWTRefreshExpireDays:   getEnvAsInt("JWT_REFRESH_EXPIRE_DAYS", 30),
+		AdminBootstrapToken:    getEnv("ADMIN_BOOTSTRAP_TOKEN", ""),
 	}
 }
 

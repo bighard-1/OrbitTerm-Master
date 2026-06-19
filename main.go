@@ -55,8 +55,14 @@ func main() {
 
 	adminAuditRepo := repository.NewAdminAuditRepository(db)
 	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
+	adminAuthService := service.NewAdminAuthService(userRepo, jwtManager, adminAuditService)
 	adminUserService := service.NewAdminUserService(userRepo, adminAuditService)
-	adminController := controller.NewAdminController(adminAuditService, adminUserService)
+	adminController := controller.NewAdminController(
+		adminAuditService,
+		adminUserService,
+		adminAuthService,
+		cfg.AdminBootstrapToken,
+	)
 
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()

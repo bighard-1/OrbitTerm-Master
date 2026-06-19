@@ -169,6 +169,15 @@ func newFakeUserRepo(users ...*model.User) *fakeUserRepo {
 }
 
 func (r *fakeUserRepo) Create(user *model.User) error {
+	if user.ID == 0 {
+		var maxID uint
+		for id := range r.users {
+			if id > maxID {
+				maxID = id
+			}
+		}
+		user.ID = maxID + 1
+	}
 	copy := *user
 	r.users[user.ID] = &copy
 	return nil
@@ -197,6 +206,21 @@ func (r *fakeUserRepo) FindByID(id uint) (*model.User, error) {
 	}
 	copy := *user
 	return &copy, nil
+}
+
+func (r *fakeUserRepo) CountByRoles(roles []string) (int64, error) {
+	roleSet := make(map[string]struct{}, len(roles))
+	for _, role := range roles {
+		roleSet[role] = struct{}{}
+	}
+
+	var count int64
+	for _, user := range r.users {
+		if _, ok := roleSet[user.Role]; ok {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (r *fakeUserRepo) List(filter repository.UserListFilter) ([]model.User, int64, error) {
