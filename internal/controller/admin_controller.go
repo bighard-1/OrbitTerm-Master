@@ -166,6 +166,119 @@ func (c *AdminController) UnbanUser(ctx *gin.Context) {
 	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
 }
 
+type resetPasswordRequest struct {
+	NewPassword string `json:"new_password" binding:"required"`
+	Reason      string `json:"reason"`
+}
+
+func (c *AdminController) ResetPassword(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	userID, ok := parsePathID(ctx, "id")
+	if !ok {
+		common.Error(ctx, http.StatusBadRequest, "用户 ID 非法")
+		return
+	}
+
+	var req resetPasswordRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	user, err := c.userService.ResetPassword(adminID, userID, req.NewPassword, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "重置登录密码失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
+type adminReasonRequest struct {
+	Reason string `json:"reason"`
+}
+
+func (c *AdminController) ForceLogout(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	userID, ok := parsePathID(ctx, "id")
+	if !ok {
+		common.Error(ctx, http.StatusBadRequest, "用户 ID 非法")
+		return
+	}
+
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	user, err := c.userService.ForceLogout(adminID, userID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "强制下线失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
+func (c *AdminController) SoftDeleteUser(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	userID, ok := parsePathID(ctx, "id")
+	if !ok {
+		common.Error(ctx, http.StatusBadRequest, "用户 ID 非法")
+		return
+	}
+
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	user, err := c.userService.SoftDeleteUser(adminID, userID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "软删除用户失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
+func (c *AdminController) RestoreUser(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	userID, ok := parsePathID(ctx, "id")
+	if !ok {
+		common.Error(ctx, http.StatusBadRequest, "用户 ID 非法")
+		return
+	}
+
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	user, err := c.userService.RestoreUser(adminID, userID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "恢复用户失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
 func extractContextUint(ctx *gin.Context, key string) (uint, bool) {
 	value, exists := ctx.Get(key)
 	if !exists {

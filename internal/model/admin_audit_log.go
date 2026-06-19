@@ -3,9 +3,13 @@ package model
 import "time"
 
 const (
-	AuditActionAdminMe   = "admin_me"
-	AuditActionUserBan   = "user_ban"
-	AuditActionUserUnban = "user_unban"
+	AuditActionAdminMe           = "admin_me"
+	AuditActionUserBan           = "user_ban"
+	AuditActionUserUnban         = "user_unban"
+	AuditActionUserResetPassword = "user_reset_password"
+	AuditActionUserForceLogout   = "user_force_logout"
+	AuditActionUserSoftDelete    = "user_soft_delete"
+	AuditActionUserRestore       = "user_restore"
 )
 
 // AdminAuditLog 记录管理端敏感操作。

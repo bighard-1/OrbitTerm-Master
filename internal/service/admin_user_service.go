@@ -9,6 +9,7 @@ import (
 
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
+	"orbitterm-server/internal/utils"
 )
 
 var (
@@ -21,6 +22,10 @@ type AdminUserService interface {
 	GetUser(id uint) (*model.User, error)
 	BanUser(adminID, targetUserID uint, durationMinutes *int, reason string, meta AdminRequestMeta) (*model.User, error)
 	UnbanUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
+	ResetPassword(adminID, targetUserID uint, newPassword, reason string, meta AdminRequestMeta) (*model.User, error)
+	ForceLogout(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
+	SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
+	RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 }
 
 type AdminUserListFilter struct {
@@ -153,6 +158,151 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserUnban,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         strings.TrimSpace(reason),
+	})
+	return user, nil
+}
+
+func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 || len(newPassword) < 8 {
+		return nil, ErrInvalidInput
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	hashed, err := utils.HashPasswordArgon2ID(newPassword)
+	if err != nil {
+		return nil, err
+	}
+
+	user.PasswordHash = hashed
+	user.MustChangePassword = true
+	user.TokenVersion++
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserResetPassword,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         strings.TrimSpace(reason),
+	})
+	return user, nil
+}
+
+func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	user.TokenVersion++
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserForceLogout,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         strings.TrimSpace(reason),
+	})
+	return user, nil
+}
+
+func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+	if adminID == targetUserID {
+		return nil, ErrAdminInvalidAction
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	now := s.now()
+	user.IsDeleted = true
+	user.DeletedAt = &now
+	user.Status = model.UserStatusDeleted
+	user.TokenVersion++
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserSoftDelete,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         strings.TrimSpace(reason),
+	})
+	return user, nil
+}
+
+func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	user.IsDeleted = false
+	user.DeletedAt = nil
+	if user.IsBanned {
+		user.Status = model.UserStatusBanned
+	} else {
+		user.Status = model.UserStatusNormal
+	}
+	user.TokenVersion++
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserRestore,
 		ResourceType:   "user",
 		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
 		BeforeSnapshot: before,

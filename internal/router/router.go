@@ -56,6 +56,26 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.UnbanUser,
 			)
+			adminGroup.POST(
+				"/users/:id/reset-password",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.ResetPassword,
+			)
+			adminGroup.POST(
+				"/users/:id/force-logout",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.ForceLogout,
+			)
+			adminGroup.POST(
+				"/users/:id/soft-delete",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.SoftDeleteUser,
+			)
+			adminGroup.POST(
+				"/users/:id/restore",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.RestoreUser,
+			)
 		}
 	}
 }

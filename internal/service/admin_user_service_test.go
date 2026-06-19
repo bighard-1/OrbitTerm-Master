@@ -71,6 +71,90 @@ func TestAdminUserServiceRejectsSelfBan(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceResetPasswordAndForceLogout(t *testing.T) {
+	userRepo := newFakeUserRepo(&model.User{
+		ID:           2,
+		Username:     "alice",
+		PasswordHash: "old-hash",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusNormal,
+		TokenVersion: 10,
+	})
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+
+	user, err := svc.ResetPassword(1, 2, "NewStrongPass123", "用户申请", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("ResetPassword failed: %v", err)
+	}
+	if user.PasswordHash == "old-hash" || user.PasswordHash == "NewStrongPass123" {
+		t.Fatalf("password hash was not securely replaced: %q", user.PasswordHash)
+	}
+	if !user.MustChangePassword {
+		t.Fatal("expected must_change_password=true")
+	}
+	if user.TokenVersion != 11 {
+		t.Fatalf("expected token version 11, got %d", user.TokenVersion)
+	}
+
+	user, err = svc.ForceLogout(1, 2, "安全检查", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("ForceLogout failed: %v", err)
+	}
+	if user.TokenVersion != 12 {
+		t.Fatalf("expected token version 12, got %d", user.TokenVersion)
+	}
+	if len(audit.entries) != 2 || audit.entries[0].Action != model.AuditActionUserResetPassword || audit.entries[1].Action != model.AuditActionUserForceLogout {
+		t.Fatalf("unexpected audit entries: %+v", audit.entries)
+	}
+}
+
+func TestAdminUserServiceSoftDeleteAndRestore(t *testing.T) {
+	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+	userRepo := newFakeUserRepo(&model.User{
+		ID:           2,
+		Username:     "alice",
+		Role:         model.UserRoleUser,
+		Status:       model.UserStatusNormal,
+		TokenVersion: 1,
+	})
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return now },
+	}
+
+	user, err := svc.SoftDeleteUser(1, 2, "注销申请", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("SoftDeleteUser failed: %v", err)
+	}
+	if !user.IsDeleted || user.Status != model.UserStatusDeleted || user.DeletedAt == nil {
+		t.Fatalf("expected deleted user, got %+v", user)
+	}
+	if user.TokenVersion != 2 {
+		t.Fatalf("expected token version 2, got %d", user.TokenVersion)
+	}
+
+	user, err = svc.RestoreUser(1, 2, "恢复账号", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("RestoreUser failed: %v", err)
+	}
+	if user.IsDeleted || user.Status != model.UserStatusNormal || user.DeletedAt != nil {
+		t.Fatalf("expected restored normal user, got %+v", user)
+	}
+	if user.TokenVersion != 3 {
+		t.Fatalf("expected token version 3, got %d", user.TokenVersion)
+	}
+	if len(audit.entries) != 2 || audit.entries[0].Action != model.AuditActionUserSoftDelete || audit.entries[1].Action != model.AuditActionUserRestore {
+		t.Fatalf("unexpected audit entries: %+v", audit.entries)
+	}
+}
+
 type fakeUserRepo struct {
 	users map[uint]*model.User
 }
