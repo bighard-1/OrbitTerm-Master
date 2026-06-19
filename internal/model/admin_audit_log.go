@@ -3,7 +3,9 @@ package model
 import "time"
 
 const (
-	AuditActionAdminMe = "admin_me"
+	AuditActionAdminMe   = "admin_me"
+	AuditActionUserBan   = "user_ban"
+	AuditActionUserUnban = "user_unban"
 )
 
 // AdminAuditLog 记录管理端敏感操作。

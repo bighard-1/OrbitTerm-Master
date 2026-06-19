@@ -3,6 +3,7 @@ package router
 import (
 	"orbitterm-server/internal/controller"
 	"orbitterm-server/internal/middleware"
+	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
 
@@ -43,6 +44,18 @@ func Register(
 		{
 			adminGroup.GET("/me", adminController.Me)
 			adminGroup.GET("/audit-logs", adminController.AuditLogs)
+			adminGroup.GET("/users", adminController.ListUsers)
+			adminGroup.GET("/users/:id", adminController.GetUser)
+			adminGroup.POST(
+				"/users/:id/ban",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.BanUser,
+			)
+			adminGroup.POST(
+				"/users/:id/unban",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.UnbanUser,
+			)
 		}
 	}
 }

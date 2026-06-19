@@ -14,6 +14,15 @@ type UserRepository interface {
 	Save(user *model.User) error
 	FindByUsername(username string) (*model.User, error)
 	FindByID(id uint) (*model.User, error)
+	List(filter UserListFilter) ([]model.User, int64, error)
+}
+
+type UserListFilter struct {
+	Query  string
+	Role   string
+	Status string
+	Limit  int
+	Offset int
 }
 
 type userRepository struct {
@@ -54,4 +63,38 @@ func (r *userRepository) FindByID(id uint) (*model.User, error) {
 		return nil, err
 	}
 	return &user, nil
+}
+
+func (r *userRepository) List(filter UserListFilter) ([]model.User, int64, error) {
+	limit := filter.Limit
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	offset := filter.Offset
+	if offset < 0 {
+		offset = 0
+	}
+
+	query := r.db.Model(&model.User{})
+	if filter.Query != "" {
+		like := "%" + filter.Query + "%"
+		query = query.Where("username ILIKE ?", like)
+	}
+	if filter.Role != "" {
+		query = query.Where("role = ?", filter.Role)
+	}
+	if filter.Status != "" {
+		query = query.Where("status = ?", filter.Status)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	var users []model.User
+	if err := query.Order("id DESC").Limit(limit).Offset(offset).Find(&users).Error; err != nil {
+		return nil, 0, err
+	}
+	return users, total, nil
 }

@@ -1,0 +1,187 @@
+package service
+
+import (
+	"encoding/json"
+	"errors"
+	"strconv"
+	"strings"
+	"time"
+
+	"orbitterm-server/internal/model"
+	"orbitterm-server/internal/repository"
+)
+
+var (
+	ErrAdminTargetNotFound = errors.New("目标用户不存在")
+	ErrAdminInvalidAction  = errors.New("管理操作不合法")
+)
+
+type AdminUserService interface {
+	ListUsers(filter AdminUserListFilter) ([]model.User, int64, error)
+	GetUser(id uint) (*model.User, error)
+	BanUser(adminID, targetUserID uint, durationMinutes *int, reason string, meta AdminRequestMeta) (*model.User, error)
+	UnbanUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
+}
+
+type AdminUserListFilter struct {
+	Query  string
+	Role   string
+	Status string
+	Limit  int
+	Offset int
+}
+
+type AdminRequestMeta struct {
+	IPAddress string
+	UserAgent string
+}
+
+type adminUserService struct {
+	userRepo     repository.UserRepository
+	auditService AdminAuditService
+	now          func() time.Time
+}
+
+func NewAdminUserService(userRepo repository.UserRepository, auditService AdminAuditService) AdminUserService {
+	return &adminUserService{
+		userRepo:     userRepo,
+		auditService: auditService,
+		now: func() time.Time {
+			return time.Now().UTC()
+		},
+	}
+}
+
+func (s *adminUserService) ListUsers(filter AdminUserListFilter) ([]model.User, int64, error) {
+	return s.userRepo.List(repository.UserListFilter{
+		Query:  strings.TrimSpace(filter.Query),
+		Role:   strings.TrimSpace(filter.Role),
+		Status: strings.TrimSpace(filter.Status),
+		Limit:  filter.Limit,
+		Offset: filter.Offset,
+	})
+}
+
+func (s *adminUserService) GetUser(id uint) (*model.User, error) {
+	if id == 0 {
+		return nil, ErrInvalidInput
+	}
+	user, err := s.userRepo.FindByID(id)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrAdminTargetNotFound
+	}
+	return user, nil
+}
+
+func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *int, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+	if adminID == targetUserID {
+		return nil, ErrAdminInvalidAction
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	now := s.now()
+	user.IsBanned = true
+	user.Status = model.UserStatusBanned
+	user.BanReason = strings.TrimSpace(reason)
+	user.BannedAt = &now
+	user.BannedBy = &adminID
+	user.TokenVersion++
+
+	if durationMinutes != nil && *durationMinutes > 0 {
+		until := now.Add(time.Duration(*durationMinutes) * time.Minute)
+		user.BanUntil = &until
+	} else {
+		user.BanUntil = nil
+	}
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserBan,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         user.BanReason,
+	})
+	return user, nil
+}
+
+func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+
+	user.IsBanned = false
+	user.BanUntil = nil
+	user.BanReason = ""
+	user.BannedAt = nil
+	user.BannedBy = nil
+	if user.IsDeleted {
+		user.Status = model.UserStatusDeleted
+	} else {
+		user.Status = model.UserStatusNormal
+	}
+	user.TokenVersion++
+
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserUnban,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         strings.TrimSpace(reason),
+	})
+	return user, nil
+}
+
+func auditSnapshot(user *model.User) string {
+	if user == nil {
+		return "{}"
+	}
+	payload := map[string]any{
+		"id":                   user.ID,
+		"username":             user.Username,
+		"role":                 user.Role,
+		"status":               user.Status,
+		"is_banned":            user.IsBanned,
+		"ban_until":            user.BanUntil,
+		"is_deleted":           user.IsDeleted,
+		"must_change_password": user.MustChangePassword,
+		"token_version":        user.TokenVersion,
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return "{}"
+	}
+	return string(data)
+}
