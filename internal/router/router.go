@@ -51,6 +51,12 @@ func Register(
 		{
 			adminGroup.GET("/me", adminController.Me)
 			adminGroup.GET("/audit-logs", adminController.AuditLogs)
+			adminGroup.GET("/system/security-policy", adminController.GetSecurityPolicy)
+			adminGroup.PUT(
+				"/system/security-policy",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.UpdateSecurityPolicy,
+			)
 			adminGroup.GET("/users", adminController.ListUsers)
 			adminGroup.GET("/users/:id", adminController.GetUser)
 			adminGroup.POST(

@@ -44,6 +44,10 @@ OrbitTerm-Server
   - `VectorClock`：版本号（使用字符串存储 JSON 结构，便于多端冲突处理）
   - `UpdatedAt`：最后更新时间
 
+- `SystemSetting`
+  - `Key`：系统配置键，例如 `security_policy`
+  - `Value`：JSON 文本配置，用于保存注册开关、密码强度等管理端策略
+
 ## 三、环境变量
 
 可选环境变量（均有默认值）：
@@ -62,6 +66,8 @@ OrbitTerm-Server
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
+- `GET /api/v1/admin/system/security-policy`
+- `PUT /api/v1/admin/system/security-policy`
 
 ### 注册示例
 
@@ -85,4 +91,4 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 go run .
 ```
 
-启动时会自动执行 `User` 与 `ServerConfig` 的表迁移。
+启动时会自动执行 `User`、`ServerConfig`、`AdminAuditLog` 与 `SystemSetting` 的表迁移。

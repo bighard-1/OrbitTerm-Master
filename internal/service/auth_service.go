@@ -11,11 +11,12 @@ import (
 )
 
 var (
-	ErrInvalidInput      = errors.New("输入参数不合法")
-	ErrUserAlreadyExists = errors.New("用户名已存在")
-	ErrInvalidCredential = errors.New("用户名或密码错误")
-	ErrAccountBanned     = errors.New("账号已被封禁")
-	ErrAccountDeleted    = errors.New("账号已注销")
+	ErrInvalidInput       = errors.New("输入参数不合法")
+	ErrUserAlreadyExists  = errors.New("用户名已存在")
+	ErrInvalidCredential  = errors.New("用户名或密码错误")
+	ErrAccountBanned      = errors.New("账号已被封禁")
+	ErrAccountDeleted     = errors.New("账号已注销")
+	ErrRegistrationClosed = errors.New("注册已关闭")
 )
 
 // AuthService 提供身份认证相关业务逻辑。
@@ -26,14 +27,21 @@ type AuthService interface {
 }
 
 type authService struct {
-	userRepo   repository.UserRepository
-	jwtManager *utils.JWTManager
+	userRepo       repository.UserRepository
+	jwtManager     *utils.JWTManager
+	policyProvider SecurityPolicyProvider
 }
 
-func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTManager) AuthService {
+func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTManager, policyProviders ...SecurityPolicyProvider) AuthService {
+	var policyProvider SecurityPolicyProvider
+	if len(policyProviders) > 0 {
+		policyProvider = policyProviders[0]
+	}
+
 	return &authService{
-		userRepo:   userRepo,
-		jwtManager: jwtManager,
+		userRepo:       userRepo,
+		jwtManager:     jwtManager,
+		policyProvider: policyProvider,
 	}
 }
 
@@ -43,8 +51,16 @@ func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTMan
 // 3) Argon2id 密码哈希；
 // 4) 创建用户记录。
 func (s *authService) Register(username, password string) (*model.User, error) {
+	policy, err := s.securityPolicy()
+	if err != nil {
+		return nil, err
+	}
+	if !policy.RegistrationEnabled {
+		return nil, ErrRegistrationClosed
+	}
+
 	username = strings.TrimSpace(username)
-	if len(username) < 3 || len(password) < 8 {
+	if len(username) < 3 || len(password) < policy.MinPasswordLength {
 		return nil, ErrInvalidInput
 	}
 
@@ -64,13 +80,27 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 	user := &model.User{
 		Username:     username,
 		PasswordHash: hashed,
-		Role:         model.UserRoleUser,
-		Status:       model.UserStatusNormal,
+		Role:         policy.DefaultUserRole,
+		Status:       policy.DefaultUserStatus,
 	}
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
 	}
 	return user, nil
+}
+
+func (s *authService) securityPolicy() (model.SecurityPolicy, error) {
+	if s.policyProvider == nil {
+		policy := model.DefaultSecurityPolicy()
+		policy.Normalize()
+		return policy, nil
+	}
+	policy, err := s.policyProvider.GetSecurityPolicy()
+	if err != nil {
+		return model.SecurityPolicy{}, err
+	}
+	policy.Normalize()
+	return policy, nil
 }
 
 // Login 登录：

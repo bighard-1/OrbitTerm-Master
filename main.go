@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// 自动迁移核心模型。生产环境建议配合版本化迁移工具（如 golang-migrate）。
-	if err := db.AutoMigrate(&model.User{}, &model.ServerConfig{}, &model.AdminAuditLog{}); err != nil {
+	if err := db.AutoMigrate(&model.User{}, &model.ServerConfig{}, &model.AdminAuditLog{}, &model.SystemSetting{}); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
@@ -46,21 +46,24 @@ func main() {
 
 	// 组装领域依赖。
 	userRepo := repository.NewUserRepository(db)
-	authService := service.NewAuthService(userRepo, jwtManager)
+	adminAuditRepo := repository.NewAdminAuditRepository(db)
+	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
+	systemSettingRepo := repository.NewSystemSettingRepository(db)
+	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
+	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService)
 	authController := controller.NewAuthController(authService)
 
 	configRepo := repository.NewServerConfigRepository(db)
 	configService := service.NewConfigService(configRepo)
 	configController := controller.NewConfigController(configService)
 
-	adminAuditRepo := repository.NewAdminAuditRepository(db)
-	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
 	adminAuthService := service.NewAdminAuthService(userRepo, jwtManager, adminAuditService)
 	adminUserService := service.NewAdminUserService(userRepo, adminAuditService)
 	adminController := controller.NewAdminController(
 		adminAuditService,
 		adminUserService,
 		adminAuthService,
+		securityPolicyService,
 		cfg.AdminBootstrapToken,
 	)
 

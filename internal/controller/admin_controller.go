@@ -18,6 +18,7 @@ type AdminController struct {
 	auditService        service.AdminAuditService
 	userService         service.AdminUserService
 	adminAuthService    service.AdminAuthService
+	securityPolicy      service.SecurityPolicyService
 	adminBootstrapToken string
 }
 
@@ -25,12 +26,14 @@ func NewAdminController(
 	auditService service.AdminAuditService,
 	userService service.AdminUserService,
 	adminAuthService service.AdminAuthService,
+	securityPolicy service.SecurityPolicyService,
 	adminBootstrapToken string,
 ) *AdminController {
 	return &AdminController{
 		auditService:        auditService,
 		userService:         userService,
 		adminAuthService:    adminAuthService,
+		securityPolicy:      securityPolicy,
 		adminBootstrapToken: adminBootstrapToken,
 	}
 }
@@ -121,6 +124,40 @@ func (c *AdminController) AuditLogs(ctx *gin.Context) {
 		return
 	}
 	common.Success(ctx, http.StatusOK, gin.H{"items": logs})
+}
+
+func (c *AdminController) GetSecurityPolicy(ctx *gin.Context) {
+	policy, err := c.securityPolicy.GetSecurityPolicy()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "安全策略读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) UpdateSecurityPolicy(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req service.SecurityPolicyUpdate
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	policy, err := c.securityPolicy.UpdateSecurityPolicy(adminID, req, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "安全策略更新失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
 }
 
 func (c *AdminController) ListUsers(ctx *gin.Context) {

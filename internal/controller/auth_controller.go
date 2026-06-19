@@ -57,7 +57,9 @@ func (c *AuthController) Register(ctx *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
-			common.Error(ctx, http.StatusBadRequest, "用户名至少 3 位且密码至少 8 位")
+			common.Error(ctx, http.StatusBadRequest, "用户名至少 3 位且密码不符合当前安全策略")
+		case errors.Is(err, service.ErrRegistrationClosed):
+			common.Error(ctx, http.StatusForbidden, "注册已关闭，请联系管理员")
 		case errors.Is(err, service.ErrUserAlreadyExists):
 			common.Error(ctx, http.StatusConflict, "用户名已存在")
 		default:
