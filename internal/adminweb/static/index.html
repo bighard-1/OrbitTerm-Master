@@ -20,6 +20,7 @@
         <button class="nav-item active" data-view="dashboard">仪表盘</button>
         <button class="nav-item" data-view="users">用户治理</button>
         <button class="nav-item" data-view="policies">系统策略</button>
+        <button class="nav-item" data-view="backup">备份自检</button>
         <button class="nav-item" data-view="audit">审计日志</button>
       </nav>
       <div class="sidebar-foot">
@@ -41,7 +42,7 @@
         <div class="panel-head">
           <div>
             <h2>首次初始化</h2>
-            <p>当前没有管理员，请创建第一个 super_admin。</p>
+            <p>当前没有管理员，请创建第一个 super_admin。初始化完成后建议清空 ADMIN_BOOTSTRAP_TOKEN 并重启后端。</p>
           </div>
         </div>
         <div class="form-grid">
@@ -56,7 +57,7 @@
         <div class="panel-head">
           <div>
             <h2>管理员登录</h2>
-            <p>使用 super_admin、admin 或 support 账号登录。</p>
+            <p>使用 super_admin、admin 或 support 账号登录。普通用户账号无法进入管理端。</p>
           </div>
         </div>
         <div class="form-grid two">
@@ -79,10 +80,10 @@
 
       <section id="usersView" class="panel hidden">
         <div class="panel-head">
-          <div><h2>用户治理</h2><p>支持筛选、封禁、解封、强制下线与重置登录密码。</p></div>
+          <div><h2>用户治理</h2><p>支持筛选、详情查看、封禁、解封、重置登录密码、强制下线、软删除与恢复。</p></div>
           <button class="ghost small" data-refresh="users">刷新</button>
         </div>
-        <div class="toolbar">
+        <div class="toolbar users-toolbar">
           <input id="userSearch" placeholder="搜索用户名" />
           <select id="userStatus">
             <option value="">全部状态</option>
@@ -91,14 +92,22 @@
             <option value="banned">banned</option>
             <option value="deleted">deleted</option>
           </select>
+          <select id="banDuration">
+            <option value="60">封禁 1 小时</option>
+            <option value="1440" selected>封禁 1 天</option>
+            <option value="10080">封禁 7 天</option>
+            <option value="43200">封禁 30 天</option>
+            <option value="0">永久封禁</option>
+          </select>
           <button id="scanExpiredBans" class="ghost">扫描到期封禁</button>
         </div>
         <div id="usersList" class="list empty">暂无数据。</div>
+        <aside id="userDetail" class="detail-card hidden" aria-live="polite"></aside>
       </section>
 
       <section id="policiesView" class="panel hidden">
         <div class="panel-head">
-          <div><h2>系统策略</h2><p>控制注册开关、密码长度与用户端恢复提示。</p></div>
+          <div><h2>系统策略</h2><p>控制注册开关、密码长度与用户端恢复提示。主密码仍保持零知识边界。</p></div>
           <button class="ghost small" data-refresh="policies">刷新</button>
         </div>
         <div class="form-grid two">
@@ -109,6 +118,14 @@
           <label class="wide-field">恢复提示<textarea id="recoveryMessage" rows="4"></textarea></label>
           <button id="savePolicies" class="primary">保存策略</button>
         </div>
+      </section>
+
+      <section id="backupView" class="panel hidden">
+        <div class="panel-head">
+          <div><h2>备份自检</h2><p>检查数据库关键表、环境变量脱敏状态与 1Panel 备份注意事项。</p></div>
+          <button id="refreshBackup" class="ghost small">重新检查</button>
+        </div>
+        <div id="backupReport" class="backup-grid empty">登录后可执行备份就绪检查。</div>
       </section>
 
       <section id="auditView" class="panel hidden">

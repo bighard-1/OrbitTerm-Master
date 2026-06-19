@@ -21,6 +21,33 @@ func TestEmbeddedAdminConsoleAssets(t *testing.T) {
 	}
 }
 
+func TestAdminConsoleIncludesGovernanceEntrypoints(t *testing.T) {
+	index, err := content.ReadFile("static/index.html")
+	if err != nil {
+		t.Fatalf("read index asset: %v", err)
+	}
+	indexText := string(index)
+	for _, marker := range []string{"backupView", "userDetail", "banDuration"} {
+		if !strings.Contains(indexText, marker) {
+			t.Fatalf("index missing governance marker %q", marker)
+		}
+	}
+
+	app, err := content.ReadFile("static/app.js")
+	if err != nil {
+		t.Fatalf("read app asset: %v", err)
+	}
+	appText := string(app)
+	for _, marker := range []string{"sessionStorage", "reset-password", "soft-delete", "backup-readiness"} {
+		if !strings.Contains(appText, marker) {
+			t.Fatalf("app missing governance marker %q", marker)
+		}
+	}
+	if strings.Contains(appText, "localStorage") {
+		t.Fatal("admin console token must not be persisted in localStorage")
+	}
+}
+
 func TestAdminConsoleRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	engine := gin.New()
