@@ -42,7 +42,7 @@ func NewAdminAuditService(repo repository.AdminAuditRepository) AdminAuditServic
 }
 
 func (s *adminAuditService) Record(entry AdminAuditEntry) error {
-	if entry.AdminUserID == 0 || entry.Action == "" {
+	if entry.Action == "" {
 		return ErrInvalidInput
 	}
 

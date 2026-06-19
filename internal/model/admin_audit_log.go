@@ -18,6 +18,7 @@ const (
 
 // AdminAuditLog 记录管理端敏感操作。
 // 重要：审计日志不保存密码、Token、私钥、主密码等敏感明文。
+// AdminUserID 为 0 时表示系统后台任务自动执行的治理动作。
 type AdminAuditLog struct {
 	ID uint `gorm:"primaryKey" json:"id"`
 

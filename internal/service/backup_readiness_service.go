@@ -143,6 +143,9 @@ func (s *backupReadinessService) environmentChecks() []EnvironmentCheck {
 		checkNumber("JWT_REFRESH_EXPIRE_DAYS", s.cfg.JWTRefreshExpireDays, s.cfg.JWTRefreshExpireDays > 0 && s.cfg.JWTRefreshExpireDays <= 90, "Refresh Token 建议设置为有限周期。"),
 		checkDSN("DATABASE_URL", s.cfg.DatabaseURL),
 		checkOptionalBootstrapToken(s.cfg.AdminBootstrapToken),
+		checkPlain("ADMIN_AUTO_UNBAN_ENABLED", fmt.Sprintf("%t", s.cfg.AdminAutoUnbanEnabled), "到期封禁自动解封任务开关。"),
+		checkNumber("ADMIN_AUTO_UNBAN_INTERVAL_MINUTES", s.cfg.AdminAutoUnbanIntervalMinutes, s.cfg.AdminAutoUnbanIntervalMinutes >= 1, "到期封禁自动解封扫描间隔，建议不低于 1 分钟。"),
+		checkNumber("ADMIN_AUTO_UNBAN_BATCH_LIMIT", s.cfg.AdminAutoUnbanBatchLimit, s.cfg.AdminAutoUnbanBatchLimit > 0 && s.cfg.AdminAutoUnbanBatchLimit <= 500, "单次自动解封扫描的最大处理数量。"),
 	}
 }
 

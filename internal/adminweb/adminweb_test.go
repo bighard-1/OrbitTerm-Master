@@ -27,7 +27,7 @@ func TestAdminConsoleIncludesGovernanceEntrypoints(t *testing.T) {
 		t.Fatalf("read index asset: %v", err)
 	}
 	indexText := string(index)
-	for _, marker := range []string{"backupView", "userDetail", "banDuration"} {
+	for _, marker := range []string{"backupView", "userDetail", "banDuration", "batchBar", "exportAudit"} {
 		if !strings.Contains(indexText, marker) {
 			t.Fatalf("index missing governance marker %q", marker)
 		}
@@ -38,7 +38,7 @@ func TestAdminConsoleIncludesGovernanceEntrypoints(t *testing.T) {
 		t.Fatalf("read app asset: %v", err)
 	}
 	appText := string(app)
-	for _, marker := range []string{"sessionStorage", "reset-password", "soft-delete", "backup-readiness"} {
+	for _, marker := range []string{"sessionStorage", "reset-password", "soft-delete", "backup-readiness", "batchUserAction", "exportAudit"} {
 		if !strings.Contains(appText, marker) {
 			t.Fatalf("app missing governance marker %q", marker)
 		}

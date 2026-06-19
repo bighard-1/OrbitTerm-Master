@@ -1,7 +1,8 @@
 const state = {
   token: sessionStorage.getItem('orbit_admin_token') || '',
   currentView: 'dashboard',
-  selectedUserID: null
+  selectedUserID: null,
+  selectedUserIDs: new Set()
 };
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +39,7 @@ function setAuth(token) {
 
 function clearSensitiveViews() {
 	state.selectedUserID = null;
+	state.selectedUserIDs.clear();
 	$('recentAudits').textContent = '登录后显示最近审计。';
 	$('usersList').textContent = '登录后显示用户列表。';
 	$('auditList').textContent = '登录后显示审计日志。';
@@ -107,6 +109,7 @@ async function loadUsers() {
   if ($('userStatus').value) params.set('status', $('userStatus').value);
   const data = await api(`/api/v1/admin/users?${params}`);
   renderList($('usersList'), data.items || [], userRow);
+  syncSelectedUsers(data.items || []);
   if (state.selectedUserID) {
     const stillVisible = (data.items || []).some(user => Number(user.id) === Number(state.selectedUserID));
     if (stillVisible) loadUserDetail(state.selectedUserID).catch(err => toast(err.message));
@@ -181,6 +184,13 @@ function userRow(user) {
   const row = document.createElement('div');
   row.className = `row user-row status-${escapeClass(user.status)}`;
 
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.className = 'select-user';
+  checkbox.checked = state.selectedUserIDs.has(Number(user.id));
+  checkbox.setAttribute('aria-label', `选择用户 ${user.username}`);
+  checkbox.addEventListener('change', () => toggleUserSelection(user.id, checkbox.checked));
+
   const info = document.createElement('button');
   info.className = 'row-main';
   info.type = 'button';
@@ -199,8 +209,29 @@ function userRow(user) {
     actionButton('解封', 'ghost', () => unbanUser(user.id)),
     actionButton('下线', 'danger', () => highRisk(`/api/v1/admin/users/${user.id}/force-logout`, { reason: promptReason('强制下线原因') }))
   );
-  row.append(info, actions);
+  row.append(checkbox, info, actions);
   return row;
+}
+
+function toggleUserSelection(userID, checked) {
+  const id = Number(userID);
+  if (checked) state.selectedUserIDs.add(id);
+  else state.selectedUserIDs.delete(id);
+  updateBatchBar();
+}
+
+function syncSelectedUsers(users) {
+  const visibleIDs = new Set(users.map(user => Number(user.id)));
+  for (const id of Array.from(state.selectedUserIDs)) {
+    if (!visibleIDs.has(id)) state.selectedUserIDs.delete(id);
+  }
+  updateBatchBar();
+}
+
+function updateBatchBar() {
+  const count = state.selectedUserIDs.size;
+  $('batchBar').classList.toggle('hidden', count === 0);
+  $('batchCount').textContent = `已选择 ${count} 个用户`;
 }
 
 function renderUserDetail(user) {
@@ -307,6 +338,47 @@ async function banUser(userID) {
   await highRisk(`/api/v1/admin/users/${userID}/ban`, body);
 }
 
+async function batchUserAction(action) {
+  const ids = Array.from(state.selectedUserIDs);
+  if (!ids.length) return;
+  const reason = promptReason(`批量${actionLabel(action)}原因`);
+  if (!reason) return;
+  if (!requireTypedConfirmation(`批量${actionLabel(action)} ${ids.length} 个用户`)) return;
+
+  const failures = [];
+  for (const id of ids) {
+    try {
+      await runUserAction(id, action, reason);
+    } catch (err) {
+      failures.push(`用户 ${id}: ${err.message}`);
+    }
+  }
+  state.selectedUserIDs.clear();
+  await refresh('users');
+  toast(failures.length ? `批量操作完成，失败 ${failures.length} 个：${failures.join('；')}` : '批量操作完成');
+}
+
+async function runUserAction(userID, action, reason) {
+  if (action === 'ban') {
+    const minutes = Number($('banDuration').value || 0);
+    const body = { reason, confirmation: 'CONFIRM' };
+    if (minutes > 0) body.duration_minutes = minutes;
+    await api(`/api/v1/admin/users/${userID}/ban`, { method: 'POST', body: JSON.stringify(body) });
+    return;
+  }
+  if (action === 'unban') {
+    await api(`/api/v1/admin/users/${userID}/unban`, { method: 'POST', body: JSON.stringify({ reason }) });
+    return;
+  }
+  if (action === 'forceLogout') {
+    await api(`/api/v1/admin/users/${userID}/force-logout`, { method: 'POST', body: JSON.stringify({ reason, confirmation: 'CONFIRM' }) });
+  }
+}
+
+function actionLabel(action) {
+  return { ban: '封禁', unban: '解封', forceLogout: '下线' }[action] || '操作';
+}
+
 async function unbanUser(userID) {
   const reason = promptReason('解封原因');
   if (!reason) return;
@@ -331,9 +403,28 @@ async function restoreUser(userID) {
 
 async function highRisk(path, body) {
   if (!body.reason) return;
-  if (!window.confirm('这是高危操作，将写入审计日志。确认继续？')) return;
+  if (!requireTypedConfirmation('高危操作')) return;
   await api(path, { method: 'POST', body: JSON.stringify({ ...body, confirmation: 'CONFIRM' }) });
   await refresh('users');
+}
+
+function requireTypedConfirmation(title) {
+  return window.prompt(`${title} 将写入审计日志。请输入 CONFIRM 继续。`) === 'CONFIRM';
+}
+
+async function exportAudit() {
+  if (!state.token) return;
+  const params = new URLSearchParams({ limit: '200', offset: '0' });
+  if ($('auditAction').value.trim()) params.set('action', $('auditAction').value.trim());
+  if ($('auditTarget').value.trim()) params.set('target_user_id', $('auditTarget').value.trim());
+  const data = await api(`/api/v1/admin/audit-logs?${params}`);
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = `orbitterm-audit-${new Date().toISOString().slice(0, 10)}.json`;
+  link.click();
+  URL.revokeObjectURL(url);
 }
 
 function promptReason(title) {
@@ -366,6 +457,11 @@ $('logoutButton').addEventListener('click', () => { setAuth(''); hideUserDetail(
 $('savePolicies').addEventListener('click', () => savePolicies().catch(err => toast(err.message)));
 $('refreshBackup').addEventListener('click', () => loadBackup().catch(err => toast(err.message)));
 $('scanExpiredBans').addEventListener('click', () => highRisk('/api/v1/admin/users/expired-bans/scan', { limit: 100, reason: promptReason('扫描原因') }));
+$('batchBan').addEventListener('click', () => batchUserAction('ban').catch(err => toast(err.message)));
+$('batchUnban').addEventListener('click', () => batchUserAction('unban').catch(err => toast(err.message)));
+$('batchForceLogout').addEventListener('click', () => batchUserAction('forceLogout').catch(err => toast(err.message)));
+$('batchClear').addEventListener('click', () => { state.selectedUserIDs.clear(); refresh('users').catch(err => toast(err.message)); });
+$('exportAudit').addEventListener('click', () => exportAudit().catch(err => toast(err.message)));
 document.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
 document.querySelectorAll('[data-refresh]').forEach(btn => btn.addEventListener('click', () => refresh(btn.dataset.refresh).catch(err => toast(err.message))));
 ['userSearch', 'userStatus', 'auditAction', 'auditTarget'].forEach(id => $(id).addEventListener('change', () => refresh(state.currentView).catch(err => toast(err.message))));

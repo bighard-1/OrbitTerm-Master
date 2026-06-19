@@ -199,6 +199,31 @@ func TestAdminUserServiceScanExpiredBans(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceScanExpiredBansBySystem(t *testing.T) {
+	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
+	expiredAt := now.Add(-time.Minute)
+	userRepo := newFakeUserRepo(
+		&model.User{ID: 2, Username: "expired", Status: model.UserStatusBanned, IsBanned: true, BanUntil: &expiredAt, TokenVersion: 1},
+	)
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return now },
+	}
+
+	result, err := svc.ScanExpiredBansBySystem(100, "系统周期性自动解封到期封禁")
+	if err != nil {
+		t.Fatalf("ScanExpiredBansBySystem failed: %v", err)
+	}
+	if result.UnbannedCount != 1 || len(result.Items) != 1 || result.Items[0].UserID != 2 {
+		t.Fatalf("unexpected scan result: %+v", result)
+	}
+	if len(audit.entries) != 1 || audit.entries[0].AdminUserID != 0 || audit.entries[0].UserAgent != "orbitterm-auto-unban-worker" {
+		t.Fatalf("expected system audit entry, got %+v", audit.entries)
+	}
+}
+
 type fakeUserRepo struct {
 	users map[uint]*model.User
 }

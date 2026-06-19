@@ -223,6 +223,16 @@ curl -s -X POST "$ORBIT_API/api/v1/admin/users/expired-bans/scan" \
   }'
 ```
 
+### 4.10 后台自动解封任务
+
+后端启动后可自动周期性扫描限时封禁用户，到期后自动解封并写入审计日志。审计中的 `admin_user_id=0` 表示系统后台任务。
+
+可通过以下环境变量控制：
+
+- `ADMIN_AUTO_UNBAN_ENABLED`：是否启用，默认 `true`。
+- `ADMIN_AUTO_UNBAN_INTERVAL_MINUTES`：扫描间隔，默认 `10`。
+- `ADMIN_AUTO_UNBAN_BATCH_LIMIT`：单次扫描上限，默认 `100`，建议不超过 `500`。
+
 ## 5. 系统策略
 
 ### 5.1 查看安全策略

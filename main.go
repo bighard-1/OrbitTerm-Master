@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 
 	"orbitterm-server/internal/config"
@@ -10,6 +11,7 @@ import (
 	"orbitterm-server/internal/router"
 	"orbitterm-server/internal/service"
 	"orbitterm-server/internal/utils"
+	"orbitterm-server/internal/worker"
 
 	"github.com/gin-gonic/gin"
 )
@@ -76,6 +78,7 @@ func main() {
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()
 	router.Register(engine, authController, configController, adminController, jwtManager, userRepo)
+	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)
 	if err := engine.Run(":" + cfg.ServerPort); err != nil {

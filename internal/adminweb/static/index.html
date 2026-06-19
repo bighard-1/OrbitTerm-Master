@@ -101,6 +101,13 @@
           </select>
           <button id="scanExpiredBans" class="ghost">扫描到期封禁</button>
         </div>
+        <div id="batchBar" class="batch-bar hidden">
+          <span id="batchCount">已选择 0 个用户</span>
+          <button id="batchBan" class="danger small">批量封禁</button>
+          <button id="batchUnban" class="ghost small">批量解封</button>
+          <button id="batchForceLogout" class="danger small">批量下线</button>
+          <button id="batchClear" class="ghost small">清空选择</button>
+        </div>
         <div id="usersList" class="list empty">暂无数据。</div>
         <aside id="userDetail" class="detail-card hidden" aria-live="polite"></aside>
       </section>
@@ -131,7 +138,10 @@
       <section id="auditView" class="panel hidden">
         <div class="panel-head">
           <div><h2>审计日志</h2><p>查看管理员敏感操作记录。</p></div>
-          <button class="ghost small" data-refresh="audit">刷新</button>
+          <div class="actions">
+            <button id="exportAudit" class="ghost small">导出 JSON</button>
+            <button class="ghost small" data-refresh="audit">刷新</button>
+          </div>
         </div>
         <div class="toolbar">
           <input id="auditAction" placeholder="action" />

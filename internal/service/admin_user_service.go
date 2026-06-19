@@ -28,6 +28,7 @@ type AdminUserService interface {
 	SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 	RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 	ScanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error)
+	ScanExpiredBansBySystem(limit int, reason string) (*AdminExpiredBanScanResult, error)
 }
 
 type AdminUserListFilter struct {
@@ -356,6 +357,14 @@ func (s *adminUserService) ScanExpiredBans(adminID uint, limit int, reason strin
 	if adminID == 0 {
 		return nil, ErrInvalidInput
 	}
+	return s.scanExpiredBans(adminID, limit, reason, meta)
+}
+
+func (s *adminUserService) ScanExpiredBansBySystem(limit int, reason string) (*AdminExpiredBanScanResult, error) {
+	return s.scanExpiredBans(0, limit, reason, AdminRequestMeta{IPAddress: "system", UserAgent: "orbitterm-auto-unban-worker"})
+}
+
+func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error) {
 	reason = strings.TrimSpace(reason)
 	if !validAdminReason(reason) {
 		return nil, ErrAdminReasonRequired

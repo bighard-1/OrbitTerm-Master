@@ -79,6 +79,9 @@ services:
       JWT_ACCESS_EXPIRE_MINUTES: "15"
       JWT_REFRESH_EXPIRE_DAYS: "30"
       ADMIN_BOOTSTRAP_TOKEN: "ReplaceWithLongRandomAdminBootstrapToken"
+      ADMIN_AUTO_UNBAN_ENABLED: "true"
+      ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
+      ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -128,6 +131,18 @@ volumes:
    - 示例：`ReplaceWithLongRandomAdminBootstrapToken`
    - 说明：首次创建管理端 `super_admin` 时必须在请求头 `X-Orbit-Admin-Bootstrap-Token` 中携带该值。
    - 注意：这不是管理员登录密码，只是一次性初始化防护令牌；创建首个管理员后仍建议轮换或清空该环境变量并重启后端。
+
+8. `ADMIN_AUTO_UNBAN_ENABLED`
+   - 示例：`true`
+   - 说明：是否启用限时封禁到期后的后台自动解封任务。
+
+9. `ADMIN_AUTO_UNBAN_INTERVAL_MINUTES`
+   - 示例：`10`
+   - 说明：自动解封扫描间隔，建议不低于 1 分钟。
+
+10. `ADMIN_AUTO_UNBAN_BATCH_LIMIT`
+   - 示例：`100`
+   - 说明：每次自动扫描最多处理的到期封禁用户数，建议不超过 500。
 
 数据库容器变量（`orbit-db`）：
 
