@@ -125,6 +125,32 @@ curl -s "$ORBIT_API/api/v1/admin/system/runtime" \
 - 查看 JWT Access/Refresh 周期和密钥强度状态。
 - 查看自动解封任务是否启用、实际扫描间隔和批量上限。
 
+### 3.2 审计日志保留策略
+
+```bash
+curl -s "$ORBIT_API/api/v1/admin/system/audit-policy" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+更新保留策略：
+
+```bash
+curl -s -X PUT "$ORBIT_API/api/v1/admin/system/audit-policy" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "retention_days": 180,
+    "cleanup_batch_limit": 500,
+    "reason": "设置审计日志保留周期"
+  }'
+```
+
+约束：
+
+- `retention_days` 最小 30，最大 3650。
+- `cleanup_batch_limit` 最小 100，最大 5000。
+- 策略更新会写入审计日志。
+
 ## 4. 用户治理接口
 
 ### 4.0 创建受管用户/管理员
@@ -411,6 +437,22 @@ curl -s "$ORBIT_API/api/v1/admin/audit-logs?limit=50&offset=0" \
 - `resource_type`
 - `admin_user_id`
 - `target_user_id`
+
+### 9.1 清理过期审计日志
+
+按当前审计保留策略清理过期记录。该操作属于高危维护操作，必须填写原因并传入二次确认。
+
+```bash
+curl -s -X POST "$ORBIT_API/api/v1/admin/audit-logs/cleanup" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "reason": "例行清理过期审计日志",
+    "confirmation": "CONFIRM"
+  }'
+```
+
+返回 `deleted_count`、`cutoff`、`retention_days` 与本次批量上限。清理动作本身会追加新的 `system_audit_cleanup` 审计记录。
 
 示例：查看某个用户相关审计：
 

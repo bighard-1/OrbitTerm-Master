@@ -89,6 +89,8 @@ OrbitTerm-Server
 - `GET /api/v1/auth/recovery-info`
 - `GET /api/v1/admin/dashboard/overview`
 - `GET /api/v1/admin/system/runtime`
+- `GET /api/v1/admin/system/audit-policy`
+- `PUT /api/v1/admin/system/audit-policy`
 - `GET /api/v1/admin/system/security-policy`
 - `PUT /api/v1/admin/system/security-policy`
 - `GET /api/v1/admin/system/recovery-policy`
@@ -96,6 +98,7 @@ OrbitTerm-Server
 - `GET /api/v1/admin/system/backup-readiness`
 - `GET /api/v1/admin/system/diagnostics`
 - `GET /api/v1/admin/audit-logs?action=&admin_user_id=&target_user_id=&limit=&offset=`
+- `POST /api/v1/admin/audit-logs/cleanup`
 - `POST /api/v1/admin/users/managed`
 - `POST /api/v1/admin/users/:id/role`
 - `POST /api/v1/admin/users/expired-bans/scan`

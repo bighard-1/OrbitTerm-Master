@@ -139,6 +139,8 @@
           <label>最小密码长度<input id="minPasswordLength" type="number" min="8" max="128" /></label>
           <label>注册关闭原因<input id="registrationReason" type="text" /></label>
           <label>支持联系方式<input id="supportContact" type="text" /></label>
+          <label>审计保留天数<input id="auditRetentionDays" type="number" min="30" max="3650" /></label>
+          <label>审计清理批量<input id="auditCleanupBatchLimit" type="number" min="100" max="5000" /></label>
           <label class="wide-field">恢复提示<textarea id="recoveryMessage" rows="4"></textarea></label>
           <button id="savePolicies" class="primary">保存策略</button>
         </div>
@@ -160,6 +162,7 @@
           <div><h2>审计日志</h2><p>查看管理员敏感操作记录。</p></div>
           <div class="actions">
             <button id="exportAudit" class="ghost small">导出 JSON</button>
+            <button id="cleanupAudit" class="danger small">清理过期</button>
             <button class="ghost small" data-refresh="audit">刷新</button>
           </div>
         </div>

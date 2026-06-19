@@ -78,6 +78,12 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.UpdateRecoveryPolicy,
 			)
+			adminGroup.GET("/system/audit-policy", adminController.GetAuditPolicy)
+			adminGroup.PUT(
+				"/system/audit-policy",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.UpdateAuditPolicy,
+			)
 			adminGroup.GET(
 				"/system/backup-readiness",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
@@ -89,6 +95,11 @@ func Register(
 				adminController.Diagnostics,
 			)
 			adminGroup.GET("/users", adminController.ListUsers)
+			adminGroup.POST(
+				"/audit-logs/cleanup",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.CleanupAuditLogs,
+			)
 			adminGroup.POST(
 				"/users/managed",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin),

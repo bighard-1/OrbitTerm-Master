@@ -144,15 +144,18 @@ async function loadUserDetail(userID) {
 }
 
 async function loadPolicies() {
-  const [security, recovery] = await Promise.all([
+  const [security, recovery, auditPolicy] = await Promise.all([
     api('/api/v1/admin/system/security-policy'),
-    api('/api/v1/admin/system/recovery-policy')
+    api('/api/v1/admin/system/recovery-policy'),
+    api('/api/v1/admin/system/audit-policy')
   ]);
   $('registrationEnabled').checked = Boolean(security.registration_enabled);
   $('minPasswordLength').value = security.min_password_length || 8;
   $('registrationReason').value = security.registration_disabled_reason || '';
   $('supportContact').value = recovery.support_contact || '';
   $('recoveryMessage').value = recovery.user_facing_message || '';
+  $('auditRetentionDays').value = auditPolicy.retention_days || 180;
+  $('auditCleanupBatchLimit').value = auditPolicy.cleanup_batch_limit || 500;
 }
 
 async function savePolicies() {
@@ -171,6 +174,14 @@ async function savePolicies() {
       support_contact: $('supportContact').value.trim(),
       user_facing_message: $('recoveryMessage').value.trim(),
       reason: '管理端更新恢复策略文案'
+    })
+  });
+  await api('/api/v1/admin/system/audit-policy', {
+    method: 'PUT',
+    body: JSON.stringify({
+      retention_days: Number($('auditRetentionDays').value || 180),
+      cleanup_batch_limit: Number($('auditCleanupBatchLimit').value || 500),
+      reason: '管理端更新审计日志保留策略'
     })
   });
   toast('策略已保存');
@@ -476,6 +487,18 @@ async function exportAudit() {
   downloadJSON(data, `orbitterm-audit-${new Date().toISOString().slice(0, 10)}.json`);
 }
 
+async function cleanupAuditLogs() {
+  const reason = promptReason('清理过期审计日志原因');
+  if (!reason) return;
+  if (!requireTypedConfirmation('清理过期审计日志')) return;
+  const result = await api('/api/v1/admin/audit-logs/cleanup', {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmation: 'CONFIRM' })
+  });
+  toast(`审计清理完成，删除 ${result.deleted_count || 0} 条，截止 ${formatDate(result.cutoff)}`);
+  await loadAudit();
+}
+
 async function exportDiagnostics() {
   if (!state.token) return;
   const data = await api('/api/v1/admin/system/diagnostics');
@@ -552,6 +575,7 @@ $('batchUnban').addEventListener('click', () => batchUserAction('unban').catch(e
 $('batchForceLogout').addEventListener('click', () => batchUserAction('forceLogout').catch(err => toast(err.message)));
 $('batchClear').addEventListener('click', () => { state.selectedUserIDs.clear(); refresh('users').catch(err => toast(err.message)); });
 $('exportAudit').addEventListener('click', () => exportAudit().catch(err => toast(err.message)));
+$('cleanupAudit').addEventListener('click', () => cleanupAuditLogs().catch(err => toast(err.message)));
 $('createManagedUser').addEventListener('click', () => createManagedUser().catch(err => toast(err.message)));
 $('auditPrev').addEventListener('click', () => moveAuditPage(-1));
 $('auditNext').addEventListener('click', () => moveAuditPage(1));

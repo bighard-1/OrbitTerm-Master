@@ -23,6 +23,7 @@ type AdminController struct {
 	adminAuthService    service.AdminAuthService
 	securityPolicy      service.SecurityPolicyService
 	recoveryPolicy      service.RecoveryPolicyService
+	auditPolicy         service.AuditPolicyService
 	backupReadiness     service.BackupReadinessService
 	dashboard           service.AdminDashboardService
 	adminBootstrapToken string
@@ -34,6 +35,7 @@ func NewAdminController(
 	adminAuthService service.AdminAuthService,
 	securityPolicy service.SecurityPolicyService,
 	recoveryPolicy service.RecoveryPolicyService,
+	auditPolicy service.AuditPolicyService,
 	backupReadiness service.BackupReadinessService,
 	dashboard service.AdminDashboardService,
 	adminBootstrapToken string,
@@ -44,6 +46,7 @@ func NewAdminController(
 		adminAuthService:    adminAuthService,
 		securityPolicy:      securityPolicy,
 		recoveryPolicy:      recoveryPolicy,
+		auditPolicy:         auditPolicy,
 		backupReadiness:     backupReadiness,
 		dashboard:           dashboard,
 		adminBootstrapToken: adminBootstrapToken,
@@ -240,6 +243,72 @@ func (c *AdminController) UpdateRecoveryPolicy(ctx *gin.Context) {
 		return
 	}
 	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) GetAuditPolicy(ctx *gin.Context) {
+	policy, err := c.auditPolicy.GetAuditPolicy()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "审计策略读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) UpdateAuditPolicy(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req service.AuditPolicyUpdate
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	policy, err := c.auditPolicy.UpdateAuditPolicy(adminID, req, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "审计策略更新失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) CleanupAuditLogs(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+
+	result, err := c.auditPolicy.CleanupExpiredAuditLogs(adminID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrAdminReasonRequired) {
+			common.Error(ctx, http.StatusBadRequest, "清理原因必填")
+			return
+		}
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "审计日志清理失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, result)
 }
 
 func (c *AdminController) BackupReadiness(ctx *gin.Context) {

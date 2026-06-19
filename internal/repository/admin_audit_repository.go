@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"time"
+
 	"orbitterm-server/internal/model"
 
 	"gorm.io/gorm"
@@ -10,6 +12,7 @@ type AdminAuditRepository interface {
 	Create(log *model.AdminAuditLog) error
 	List(limit int) ([]model.AdminAuditLog, error)
 	ListWithFilter(filter AdminAuditListFilter) ([]model.AdminAuditLog, int64, error)
+	DeleteOlderThan(cutoff time.Time, limit int) (int64, error)
 }
 
 type AdminAuditListFilter struct {
@@ -73,4 +76,25 @@ func (r *adminAuditRepository) ListWithFilter(filter AdminAuditListFilter) ([]mo
 		return nil, 0, err
 	}
 	return logs, total, nil
+}
+
+func (r *adminAuditRepository) DeleteOlderThan(cutoff time.Time, limit int) (int64, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+
+	var ids []uint
+	if err := r.db.Model(&model.AdminAuditLog{}).
+		Where("created_at < ?", cutoff).
+		Order("id ASC").
+		Limit(limit).
+		Pluck("id", &ids).Error; err != nil {
+		return 0, err
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := r.db.Where("id IN ?", ids).Delete(&model.AdminAuditLog{})
+	return result.RowsAffected, result.Error
 }

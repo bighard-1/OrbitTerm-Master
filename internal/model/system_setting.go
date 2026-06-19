@@ -8,9 +8,12 @@ import (
 const (
 	SystemSettingKeySecurityPolicy = "security_policy"
 	SystemSettingKeyRecoveryPolicy = "recovery_policy"
+	SystemSettingKeyAuditPolicy    = "audit_policy"
 
 	AuditActionSystemSecurityPolicyUpdate = "system_security_policy_update"
 	AuditActionSystemRecoveryPolicyUpdate = "system_recovery_policy_update"
+	AuditActionSystemAuditPolicyUpdate    = "system_audit_policy_update"
+	AuditActionSystemAuditCleanup         = "system_audit_cleanup"
 )
 
 // SystemSetting 存储服务端运行策略等小型配置。
@@ -110,5 +113,34 @@ func (p *RecoveryPolicy) Normalize() {
 	p.UserFacingMessage = strings.TrimSpace(p.UserFacingMessage)
 	if p.UserFacingMessage == "" {
 		p.UserFacingMessage = DefaultRecoveryPolicy().UserFacingMessage
+	}
+}
+
+// AuditPolicy 控制管理端审计日志生命周期。
+// 审计日志用于追责和排障，不能无限期堆积；保留周期过短也会降低安全可追溯性。
+type AuditPolicy struct {
+	RetentionDays     int `json:"retention_days"`
+	CleanupBatchLimit int `json:"cleanup_batch_limit"`
+}
+
+func DefaultAuditPolicy() AuditPolicy {
+	return AuditPolicy{
+		RetentionDays:     180,
+		CleanupBatchLimit: 500,
+	}
+}
+
+func (p *AuditPolicy) Normalize() {
+	if p.RetentionDays < 30 {
+		p.RetentionDays = 30
+	}
+	if p.RetentionDays > 3650 {
+		p.RetentionDays = 3650
+	}
+	if p.CleanupBatchLimit < 100 {
+		p.CleanupBatchLimit = 100
+	}
+	if p.CleanupBatchLimit > 5000 {
+		p.CleanupBatchLimit = 5000
 	}
 }
