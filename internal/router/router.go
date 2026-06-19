@@ -1,6 +1,8 @@
 package router
 
 import (
+	"time"
+
 	"orbitterm-server/internal/adminweb"
 	"orbitterm-server/internal/controller"
 	"orbitterm-server/internal/middleware"
@@ -49,6 +51,7 @@ func Register(
 
 		adminGroup := v1.Group("/admin")
 		adminGroup.Use(
+			middleware.IPRateLimit(180, time.Minute),
 			middleware.JWTAuthMiddleware(jwtManager, userRepo),
 			middleware.RequireAdminRole(),
 		)
@@ -75,11 +78,21 @@ func Register(
 			)
 			adminGroup.GET("/users", adminController.ListUsers)
 			adminGroup.POST(
+				"/users/managed",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				adminController.CreateManagedUser,
+			)
+			adminGroup.POST(
 				"/users/expired-bans/scan",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.ScanExpiredBans,
 			)
 			adminGroup.GET("/users/:id", adminController.GetUser)
+			adminGroup.POST(
+				"/users/:id/role",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				adminController.UpdateUserRole,
+			)
 			adminGroup.POST(
 				"/users/:id/ban",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),

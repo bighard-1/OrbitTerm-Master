@@ -14,6 +14,8 @@ const (
 	AuditActionUserForceLogout           = "user_force_logout"
 	AuditActionUserSoftDelete            = "user_soft_delete"
 	AuditActionUserRestore               = "user_restore"
+	AuditActionAdminUserCreate           = "admin_user_create"
+	AuditActionUserRoleUpdate            = "user_role_update"
 )
 
 // AdminAuditLog 记录管理端敏感操作。

@@ -2,7 +2,10 @@ const state = {
   token: sessionStorage.getItem('orbit_admin_token') || '',
   currentView: 'dashboard',
   selectedUserID: null,
-  selectedUserIDs: new Set()
+  selectedUserIDs: new Set(),
+  auditOffset: 0,
+  auditLimit: 50,
+  auditTotal: 0
 };
 
 const $ = (id) => document.getElementById(id);
@@ -162,11 +165,13 @@ async function loadBackup() {
 }
 
 async function loadAudit() {
-  const params = new URLSearchParams({ limit: '50', offset: '0' });
+  const params = new URLSearchParams({ limit: String(state.auditLimit), offset: String(state.auditOffset) });
   if ($('auditAction').value.trim()) params.set('action', $('auditAction').value.trim());
   if ($('auditTarget').value.trim()) params.set('target_user_id', $('auditTarget').value.trim());
   const data = await api(`/api/v1/admin/audit-logs?${params}`);
+  state.auditTotal = data.total || 0;
   renderList($('auditList'), data.items || [], auditRow);
+  renderAuditPager();
 }
 
 function renderList(container, items, renderer) {
@@ -257,12 +262,14 @@ function renderUserDetail(user) {
     </div>
     <div class="actions detail-actions">
       <button class="ghost" id="resetPasswordButton">重置登录密码</button>
+      <button class="ghost" id="changeRoleButton">调整角色</button>
       <button class="danger" id="softDeleteButton">软删除/注销</button>
       <button class="ghost" id="restoreButton">恢复用户</button>
     </div>
   `;
   $('closeUserDetail').addEventListener('click', hideUserDetail);
   $('resetPasswordButton').addEventListener('click', () => resetPassword(user.id).catch(err => toast(err.message)));
+  $('changeRoleButton').addEventListener('click', () => changeRole(user.id, user.role).catch(err => toast(err.message)));
   $('softDeleteButton').addEventListener('click', () => highRisk(`/api/v1/admin/users/${user.id}/soft-delete`, { reason: promptReason('软删除/注销原因') }).catch(err => toast(err.message)));
   $('restoreButton').addEventListener('click', () => restoreUser(user.id).catch(err => toast(err.message)));
 }
@@ -401,6 +408,37 @@ async function restoreUser(userID) {
   await refresh('users');
 }
 
+async function createManagedUser() {
+  const username = $('managedUsername').value.trim();
+  const password = $('managedPassword').value;
+  const role = $('managedRole').value;
+  const reason = promptReason('创建受管账号原因');
+  if (!username || !password || !role || !reason) return;
+  if (!requireTypedConfirmation(`创建 ${role} 账号 ${username}`)) return;
+  await api('/api/v1/admin/users/managed', {
+    method: 'POST',
+    body: JSON.stringify({ username, password, role, reason, confirmation: 'CONFIRM' })
+  });
+  $('managedUsername').value = '';
+  $('managedPassword').value = '';
+  toast('账号已创建');
+  await refresh('users');
+}
+
+async function changeRole(userID, currentRole) {
+  const role = window.prompt(`请输入新角色：super_admin / admin / support / user\n当前角色：${currentRole}`);
+  if (!role) return;
+  const reason = promptReason('调整角色原因');
+  if (!reason) return;
+  if (!requireTypedConfirmation(`将用户 ${userID} 角色调整为 ${role}`)) return;
+  await api(`/api/v1/admin/users/${userID}/role`, {
+    method: 'POST',
+    body: JSON.stringify({ role, reason, confirmation: 'CONFIRM' })
+  });
+  toast('角色已调整，目标用户旧 Token 已失效');
+  await refresh('users');
+}
+
 async function highRisk(path, body) {
   if (!body.reason) return;
   if (!requireTypedConfirmation('高危操作')) return;
@@ -425,6 +463,19 @@ async function exportAudit() {
   link.download = `orbitterm-audit-${new Date().toISOString().slice(0, 10)}.json`;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+function renderAuditPager() {
+  const page = Math.floor(state.auditOffset / state.auditLimit) + 1;
+  const pages = Math.max(1, Math.ceil(state.auditTotal / state.auditLimit));
+  $('auditPageInfo').textContent = `第 ${page} / ${pages} 页，共 ${state.auditTotal} 条`;
+  $('auditPrev').disabled = state.auditOffset <= 0;
+  $('auditNext').disabled = state.auditOffset + state.auditLimit >= state.auditTotal;
+}
+
+function moveAuditPage(direction) {
+  state.auditOffset = Math.max(0, state.auditOffset + direction * state.auditLimit);
+  loadAudit().catch(err => toast(err.message));
 }
 
 function promptReason(title) {
@@ -462,9 +513,13 @@ $('batchUnban').addEventListener('click', () => batchUserAction('unban').catch(e
 $('batchForceLogout').addEventListener('click', () => batchUserAction('forceLogout').catch(err => toast(err.message)));
 $('batchClear').addEventListener('click', () => { state.selectedUserIDs.clear(); refresh('users').catch(err => toast(err.message)); });
 $('exportAudit').addEventListener('click', () => exportAudit().catch(err => toast(err.message)));
+$('createManagedUser').addEventListener('click', () => createManagedUser().catch(err => toast(err.message)));
+$('auditPrev').addEventListener('click', () => moveAuditPage(-1));
+$('auditNext').addEventListener('click', () => moveAuditPage(1));
 document.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
 document.querySelectorAll('[data-refresh]').forEach(btn => btn.addEventListener('click', () => refresh(btn.dataset.refresh).catch(err => toast(err.message))));
-['userSearch', 'userStatus', 'auditAction', 'auditTarget'].forEach(id => $(id).addEventListener('change', () => refresh(state.currentView).catch(err => toast(err.message))));
+['userSearch', 'userStatus'].forEach(id => $(id).addEventListener('change', () => refresh(state.currentView).catch(err => toast(err.message))));
+['auditAction', 'auditTarget'].forEach(id => $(id).addEventListener('change', () => { state.auditOffset = 0; refresh(state.currentView).catch(err => toast(err.message)); }));
 ['loginUsername', 'loginPassword'].forEach(id => $(id).addEventListener('keydown', event => {
   if (event.key === 'Enter') login().catch(err => toast(err.message));
 }));

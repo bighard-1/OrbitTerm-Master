@@ -29,6 +29,8 @@ type AdminUserService interface {
 	RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error)
 	ScanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error)
 	ScanExpiredBansBySystem(limit int, reason string) (*AdminExpiredBanScanResult, error)
+	CreateManagedUser(adminID uint, username, password, role, reason string, meta AdminRequestMeta) (*model.User, error)
+	UpdateUserRole(adminID, targetUserID uint, role, reason string, meta AdminRequestMeta) (*model.User, error)
 }
 
 type AdminUserListFilter struct {
@@ -364,6 +366,100 @@ func (s *adminUserService) ScanExpiredBansBySystem(limit int, reason string) (*A
 	return s.scanExpiredBans(0, limit, reason, AdminRequestMeta{IPAddress: "system", UserAgent: "orbitterm-auto-unban-worker"})
 }
 
+func (s *adminUserService) CreateManagedUser(adminID uint, username, password, role, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || len(password) < 8 {
+		return nil, ErrInvalidInput
+	}
+	username = strings.TrimSpace(username)
+	role = strings.TrimSpace(role)
+	reason = strings.TrimSpace(reason)
+	if username == "" || !validManagedRole(role) {
+		return nil, ErrInvalidInput
+	}
+	if !validAdminReason(reason) {
+		return nil, ErrAdminReasonRequired
+	}
+
+	existing, err := s.userRepo.FindByUsername(username)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		return nil, ErrUserAlreadyExists
+	}
+
+	hashed, err := utils.HashPasswordArgon2ID(password)
+	if err != nil {
+		return nil, err
+	}
+	user := &model.User{
+		Username:           username,
+		PasswordHash:       hashed,
+		Role:               role,
+		Status:             model.UserStatusNormal,
+		MustChangePassword: true,
+		CreatedBy:          &adminID,
+		UpdatedBy:          &adminID,
+	}
+	if err := s.userRepo.Create(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:   adminID,
+		TargetUserID:  &user.ID,
+		Action:        model.AuditActionAdminUserCreate,
+		ResourceType:  "user",
+		ResourceID:    strconv.FormatUint(uint64(user.ID), 10),
+		AfterSnapshot: auditSnapshot(user),
+		IPAddress:     meta.IPAddress,
+		UserAgent:     meta.UserAgent,
+		Reason:        reason,
+	})
+	return user, nil
+}
+
+func (s *adminUserService) UpdateUserRole(adminID, targetUserID uint, role, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if adminID == 0 || targetUserID == 0 {
+		return nil, ErrInvalidInput
+	}
+	role = strings.TrimSpace(role)
+	reason = strings.TrimSpace(reason)
+	if !validManagedRole(role) || !validAdminReason(reason) {
+		if !validAdminReason(reason) {
+			return nil, ErrAdminReasonRequired
+		}
+		return nil, ErrInvalidInput
+	}
+	if adminID == targetUserID {
+		return nil, ErrAdminInvalidAction
+	}
+
+	user, err := s.GetUser(targetUserID)
+	if err != nil {
+		return nil, err
+	}
+	before := auditSnapshot(user)
+	user.Role = role
+	user.UpdatedBy = &adminID
+	user.TokenVersion++
+	if err := s.userRepo.Save(user); err != nil {
+		return nil, err
+	}
+	_ = s.auditService.Record(AdminAuditEntry{
+		AdminUserID:    adminID,
+		TargetUserID:   &targetUserID,
+		Action:         model.AuditActionUserRoleUpdate,
+		ResourceType:   "user",
+		ResourceID:     strconv.FormatUint(uint64(targetUserID), 10),
+		BeforeSnapshot: before,
+		AfterSnapshot:  auditSnapshot(user),
+		IPAddress:      meta.IPAddress,
+		UserAgent:      meta.UserAgent,
+		Reason:         reason,
+	})
+	return user, nil
+}
+
 func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error) {
 	reason = strings.TrimSpace(reason)
 	if !validAdminReason(reason) {
@@ -418,6 +514,15 @@ func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason strin
 
 func validAdminReason(reason string) bool {
 	return len(strings.TrimSpace(reason)) >= 2
+}
+
+func validManagedRole(role string) bool {
+	switch role {
+	case model.UserRoleSuperAdmin, model.UserRoleAdmin, model.UserRoleSupport, model.UserRoleUser:
+		return true
+	default:
+		return false
+	}
 }
 
 func auditSnapshot(user *model.User) string {

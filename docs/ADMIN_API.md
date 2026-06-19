@@ -103,6 +103,38 @@ curl -s "$ORBIT_API/api/v1/admin/dashboard/overview" \
 
 ## 4. 用户治理接口
 
+### 4.0 创建受管用户/管理员
+
+仅 `super_admin` 可调用。创建后用户必须修改初始登录密码。
+
+```bash
+curl -s -X POST "$ORBIT_API/api/v1/admin/users/managed" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "ops-admin@example.com",
+    "password": "ReplaceWithStrongInitialPassword123",
+    "role": "admin",
+    "reason": "新增运维管理员",
+    "confirmation": "CONFIRM"
+  }'
+```
+
+### 4.0.1 调整用户角色
+
+仅 `super_admin` 可调用。禁止管理员调整自己的角色，避免自我降权后无法恢复。
+
+```bash
+curl -s -X POST "$ORBIT_API/api/v1/admin/users/用户ID/role" \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "role": "support",
+    "reason": "临时降级为支持角色",
+    "confirmation": "CONFIRM"
+  }'
+```
+
 ### 4.1 用户列表
 
 ```bash
@@ -344,8 +376,8 @@ curl -s "$ORBIT_API/api/v1/admin/audit-logs?target_user_id=用户ID&limit=50" \
 
 | 角色 | 可查看 | 可操作 |
 | --- | --- | --- |
-| `super_admin` | 所有管理端数据 | 所有管理端操作 |
-| `admin` | 所有管理端数据 | 用户治理、策略修改、备份自检 |
+| `super_admin` | 所有管理端数据 | 所有管理端操作、创建管理员、调整角色 |
+| `admin` | 所有管理端数据 | 用户治理、策略修改、备份自检；不能创建管理员或调整角色 |
 | `support` | 用户列表、审计、策略查看 | 不可执行高危操作 |
 | `user` | 普通客户端接口 | 无管理端权限 |
 

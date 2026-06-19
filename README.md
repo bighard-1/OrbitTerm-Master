@@ -91,6 +91,8 @@ OrbitTerm-Server
 - `PUT /api/v1/admin/system/recovery-policy`
 - `GET /api/v1/admin/system/backup-readiness`
 - `GET /api/v1/admin/audit-logs?action=&admin_user_id=&target_user_id=&limit=&offset=`
+- `POST /api/v1/admin/users/managed`
+- `POST /api/v1/admin/users/:id/role`
 - `POST /api/v1/admin/users/expired-bans/scan`
 
 后端还内置到期封禁自动解封任务，可通过 `ADMIN_AUTO_UNBAN_ENABLED`、`ADMIN_AUTO_UNBAN_INTERVAL_MINUTES` 与 `ADMIN_AUTO_UNBAN_BATCH_LIMIT` 控制。

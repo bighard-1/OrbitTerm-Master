@@ -302,6 +302,73 @@ func (c *AdminController) GetUser(ctx *gin.Context) {
 	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
 }
 
+type createManagedUserRequest struct {
+	Username     string `json:"username" binding:"required"`
+	Password     string `json:"password" binding:"required"`
+	Role         string `json:"role" binding:"required"`
+	Reason       string `json:"reason"`
+	Confirmation string `json:"confirmation"`
+}
+
+func (c *AdminController) CreateManagedUser(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req createManagedUserRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+
+	user, err := c.userService.CreateManagedUser(adminID, req.Username, req.Password, req.Role, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "创建用户失败")
+		return
+	}
+	common.Success(ctx, http.StatusCreated, toAdminUserResponse(user))
+}
+
+type updateUserRoleRequest struct {
+	Role         string `json:"role" binding:"required"`
+	Reason       string `json:"reason"`
+	Confirmation string `json:"confirmation"`
+}
+
+func (c *AdminController) UpdateUserRole(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	userID, ok := parsePathID(ctx, "id")
+	if !ok {
+		common.Error(ctx, http.StatusBadRequest, "用户 ID 非法")
+		return
+	}
+
+	var req updateUserRoleRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+
+	user, err := c.userService.UpdateUserRole(adminID, userID, req.Role, req.Reason, requestMeta(ctx))
+	if err != nil {
+		writeAdminUserError(ctx, err, "调整用户角色失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, toAdminUserResponse(user))
+}
+
 type banUserRequest struct {
 	DurationMinutes *int   `json:"duration_minutes,omitempty"`
 	Reason          string `json:"reason"`

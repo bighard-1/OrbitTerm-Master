@@ -224,6 +224,48 @@ func TestAdminUserServiceScanExpiredBansBySystem(t *testing.T) {
 	}
 }
 
+func TestAdminUserServiceCreateManagedUserAndUpdateRole(t *testing.T) {
+	userRepo := newFakeUserRepo()
+	audit := &fakeAdminAuditService{}
+	svc := &adminUserService{
+		userRepo:     userRepo,
+		auditService: audit,
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+
+	user, err := svc.CreateManagedUser(99, "ops-admin", "StrongPass123", model.UserRoleAdmin, "新增运维管理员", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("CreateManagedUser failed: %v", err)
+	}
+	if user.ID == 0 || user.Role != model.UserRoleAdmin || !user.MustChangePassword || user.PasswordHash == "StrongPass123" {
+		t.Fatalf("unexpected created user: %+v", user)
+	}
+
+	updated, err := svc.UpdateUserRole(99, user.ID, model.UserRoleSupport, "临时降级为支持角色", AdminRequestMeta{})
+	if err != nil {
+		t.Fatalf("UpdateUserRole failed: %v", err)
+	}
+	if updated.Role != model.UserRoleSupport || updated.TokenVersion != 1 {
+		t.Fatalf("unexpected updated user: %+v", updated)
+	}
+	if len(audit.entries) != 2 || audit.entries[0].Action != model.AuditActionAdminUserCreate || audit.entries[1].Action != model.AuditActionUserRoleUpdate {
+		t.Fatalf("unexpected audit entries: %+v", audit.entries)
+	}
+}
+
+func TestAdminUserServiceRejectsSelfRoleUpdate(t *testing.T) {
+	svc := &adminUserService{
+		userRepo:     newFakeUserRepo(&model.User{ID: 1, Username: "root", Role: model.UserRoleSuperAdmin}),
+		auditService: &fakeAdminAuditService{},
+		now:          func() time.Time { return time.Now().UTC() },
+	}
+
+	_, err := svc.UpdateUserRole(1, 1, model.UserRoleAdmin, "自我降权", AdminRequestMeta{})
+	if !errors.Is(err, ErrAdminInvalidAction) {
+		t.Fatalf("expected ErrAdminInvalidAction, got %v", err)
+	}
+}
+
 type fakeUserRepo struct {
 	users map[uint]*model.User
 }
