@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"time"
 
 	"orbitterm-server/internal/config"
 	"orbitterm-server/internal/controller"
@@ -23,6 +24,8 @@ import (
 // 3) 初始化依赖（仓储层、服务层、控制器）；
 // 4) 挂载路由并启动 HTTP 服务。
 func main() {
+	startedAt := time.Now().UTC()
+
 	// 加载环境配置（端口、数据库、JWT 等）。
 	cfg := config.Load()
 
@@ -61,6 +64,8 @@ func main() {
 	configService := service.NewConfigService(configRepo)
 	configController := controller.NewConfigController(configService)
 	adminDashboardService := service.NewAdminDashboardService(userRepo, configRepo, adminAuditService, backupReadinessService)
+	systemHealthService := service.NewSystemHealthService(db, cfg, startedAt)
+	healthController := controller.NewHealthController(systemHealthService)
 
 	adminAuthService := service.NewAdminAuthService(userRepo, jwtManager, adminAuditService)
 	adminUserService := service.NewAdminUserService(userRepo, adminAuditService)
@@ -77,7 +82,7 @@ func main() {
 
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()
-	router.Register(engine, authController, configController, adminController, jwtManager, userRepo)
+	router.Register(engine, authController, configController, adminController, healthController, jwtManager, userRepo)
 	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)

@@ -84,6 +84,16 @@ export ADMIN_TOKEN="粘贴返回的 access_token"
 -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+## 2.1 公共健康检查
+
+该接口无需登录，适合 1Panel、反向代理或外部探活使用。
+
+```bash
+curl -s "$ORBIT_API/healthz"
+```
+
+返回 `status=ok` 表示后端和数据库连通；若数据库不可达会返回 HTTP 503，状态为 `degraded`。
+
 ## 3. 管理端首页概览
 
 ```bash
@@ -100,6 +110,20 @@ curl -s "$ORBIT_API/api/v1/admin/dashboard/overview" \
 - 云端配置数量
 - 备份就绪摘要
 - 最近审计日志
+
+### 3.1 管理端运行状态
+
+```bash
+curl -s "$ORBIT_API/api/v1/admin/system/runtime" \
+  -H "Authorization: Bearer $ADMIN_TOKEN"
+```
+
+用途：
+
+- 查看服务运行时长。
+- 查看数据库连通性与连接池摘要。
+- 查看 JWT Access/Refresh 周期和密钥强度状态。
+- 查看自动解封任务是否启用、实际扫描间隔和批量上限。
 
 ## 4. 用户治理接口
 

@@ -82,11 +82,13 @@ OrbitTerm-Server
 
 ## 五、接口
 
+- `GET /healthz`
 - `POST /api/v1/auth/register`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/recovery-info`
 - `GET /api/v1/admin/dashboard/overview`
+- `GET /api/v1/admin/system/runtime`
 - `GET /api/v1/admin/system/security-policy`
 - `PUT /api/v1/admin/system/security-policy`
 - `GET /api/v1/admin/system/recovery-policy`

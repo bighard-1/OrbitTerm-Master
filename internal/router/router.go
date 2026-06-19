@@ -19,10 +19,12 @@ func Register(
 	authController *controller.AuthController,
 	configController *controller.ConfigController,
 	adminController *controller.AdminController,
+	healthController *controller.HealthController,
 	jwtManager *utils.JWTManager,
 	userRepo repository.UserRepository,
 ) {
 	adminweb.Register(engine)
+	engine.GET("/healthz", healthController.Health)
 
 	v1 := engine.Group("/api/v1")
 	{
@@ -59,6 +61,11 @@ func Register(
 			adminGroup.GET("/me", adminController.Me)
 			adminGroup.GET("/dashboard/overview", adminController.DashboardOverview)
 			adminGroup.GET("/audit-logs", adminController.AuditLogs)
+			adminGroup.GET(
+				"/system/runtime",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				healthController.RuntimeStatus,
+			)
 			adminGroup.GET("/system/security-policy", adminController.GetSecurityPolicy)
 			adminGroup.PUT(
 				"/system/security-policy",

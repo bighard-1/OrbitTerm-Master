@@ -38,6 +38,11 @@ services:
       ADMIN_BOOTSTRAP_TOKEN: "replace-with-strong-admin-bootstrap-token"
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
 
 volumes:
   orbit_db_data:

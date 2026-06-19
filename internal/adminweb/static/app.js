@@ -47,6 +47,10 @@ function clearSensitiveViews() {
 	$('usersList').textContent = '登录后显示用户列表。';
 	$('auditList').textContent = '登录后显示审计日志。';
 	$('backupReport').textContent = '登录后可执行备份就绪检查。';
+	$('metricRuntime').textContent = '--';
+	$('runtimeHint').textContent = '等待检查';
+	$('metricAutoUnban').textContent = '--';
+	$('autoUnbanHint').textContent = '等待检查';
 	['recentAudits', 'usersList', 'auditList', 'backupReport'].forEach(id => $(id).classList.add('empty'));
 	$('userDetail').classList.add('hidden');
 	$('userDetail').innerHTML = '';
@@ -98,12 +102,25 @@ async function refresh(view) {
 }
 
 async function loadDashboard() {
-  const data = await api('/api/v1/admin/dashboard/overview');
+  const [data, runtime] = await Promise.all([
+    api('/api/v1/admin/dashboard/overview'),
+    api('/api/v1/admin/system/runtime')
+  ]);
   $('metricUsers').textContent = data.users?.total ?? '--';
   $('metricBanned').textContent = data.users?.banned ?? '--';
   $('metricConfigs').textContent = data.configs?.total ?? '--';
   $('metricBackup').textContent = data.backup?.ready ? 'OK' : `${data.backup?.warning_count ?? 0} 警告`;
+  renderRuntimeStatus(runtime);
   renderList($('recentAudits'), data.recent_audits || [], auditRow);
+}
+
+function renderRuntimeStatus(runtime) {
+  $('metricRuntime').textContent = runtime.status === 'ok' ? 'OK' : 'DEGRADED';
+  $('runtimeHint').textContent = `DB ${runtime.database?.reachable ? '正常' : '异常'} · 已运行 ${formatDuration(runtime.uptime_seconds || 0)}`;
+  $('metricAutoUnban').textContent = runtime.auto_unban?.enabled ? 'ON' : 'OFF';
+  $('autoUnbanHint').textContent = runtime.auto_unban?.enabled
+    ? `${runtime.auto_unban.effective_interval_minutes} 分钟/次 · 上限 ${runtime.auto_unban.effective_batch_limit}`
+    : '未启用，到期封禁需手动扫描';
 }
 
 async function loadUsers() {
@@ -503,6 +520,16 @@ function formatDate(value) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return String(value);
   return date.toLocaleString('zh-CN', { hour12: false });
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Number(seconds) || 0);
+  const days = Math.floor(total / 86400);
+  const hours = Math.floor((total % 86400) / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  if (days > 0) return `${days}天${hours}小时`;
+  if (hours > 0) return `${hours}小时${minutes}分钟`;
+  return `${minutes}分钟`;
 }
 
 function escapeClass(value) {
