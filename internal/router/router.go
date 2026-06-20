@@ -30,10 +30,10 @@ func Register(
 	{
 		auth := v1.Group("/auth")
 		{
-			auth.POST("/register", authController.Register)
-			auth.POST("/login", authController.Login)
-			auth.POST("/refresh", authController.Refresh)
-			auth.GET("/recovery-info", authController.RecoveryInfo)
+			auth.POST("/register", middleware.IPRateLimit(10, time.Hour), authController.Register)
+			auth.POST("/login", middleware.IPRateLimit(30, time.Minute), authController.Login)
+			auth.POST("/refresh", middleware.IPRateLimit(120, time.Minute), authController.Refresh)
+			auth.GET("/recovery-info", middleware.IPRateLimit(60, time.Minute), authController.RecoveryInfo)
 		}
 
 		configGroup := v1.Group("/config")
@@ -53,9 +53,9 @@ func Register(
 
 		adminPublic := v1.Group("/admin")
 		{
-			adminPublic.GET("/bootstrap/status", adminController.BootstrapStatus)
-			adminPublic.POST("/bootstrap/super-admin", adminController.BootstrapSuperAdmin)
-			adminPublic.POST("/auth/login", adminController.Login)
+			adminPublic.GET("/bootstrap/status", middleware.IPRateLimit(60, time.Minute), adminController.BootstrapStatus)
+			adminPublic.POST("/bootstrap/super-admin", middleware.IPRateLimit(5, time.Hour), adminController.BootstrapSuperAdmin)
+			adminPublic.POST("/auth/login", middleware.IPRateLimit(20, time.Minute), adminController.Login)
 		}
 
 		adminGroup := v1.Group("/admin")

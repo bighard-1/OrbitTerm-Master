@@ -109,7 +109,7 @@ func (m *JWTManager) GenerateTokenPair(userID uint, username string, tokenVersio
 // 3) 校验过期时间与 Issuer。
 func (m *JWTManager) ParseAndVerifyToken(tokenString string) (*CustomClaims, error) {
 	token, err := jwt.ParseWithClaims(tokenString, &CustomClaims{}, func(token *jwt.Token) (any, error) {
-		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+		if token.Method.Alg() != jwt.SigningMethodHS256.Alg() {
 			return nil, errors.New("unexpected signing method")
 		}
 		return m.secretKey, nil

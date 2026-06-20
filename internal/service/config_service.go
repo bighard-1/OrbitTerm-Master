@@ -58,66 +58,118 @@ func (defaultAssetDeletionPolicyReader) GetAssetDeletionPolicy() (model.AssetDel
 	return policy, nil
 }
 
+type configUploadInput struct {
+	userID              uint
+	configID            *uint
+	assetID             string
+	identityFingerprint string
+	encryptedBlob       []byte
+	vectorClock         string
+}
+
 // Upload 保持旧协议兼容，同时允许新版客户端回填稳定 AssetID。
 // 已进入 deleted/purged 的资产只能通过显式恢复接口重新激活。
 func (s *configService) Upload(userID uint, configID *uint, assetID, identityFingerprint string, encryptedBlob []byte, vectorClock string) (*model.ServerConfig, error) {
-	assetID = strings.TrimSpace(assetID)
-	identityFingerprint = strings.ToLower(strings.TrimSpace(identityFingerprint))
-	if userID == 0 || len(encryptedBlob) == 0 || !validVectorClock(vectorClock) {
-		return nil, ErrConfigInvalidInput
-	}
-	if assetID != "" && !validUUID(assetID) {
-		return nil, ErrConfigInvalidInput
-	}
-	if identityFingerprint != "" && !validHexDigest(identityFingerprint) {
-		return nil, ErrConfigInvalidInput
-	}
-
-	var existing *model.ServerConfig
-	var err error
-	if configID != nil && *configID != 0 {
-		existing, err = s.configRepo.FindByIDAndUserID(*configID, userID)
-	} else if assetID != "" {
-		existing, err = s.configRepo.FindByAssetIDAndUserID(assetID, userID)
-	}
+	input, err := normalizeConfigUploadInput(
+		userID, configID, assetID, identityFingerprint, encryptedBlob, vectorClock,
+	)
 	if err != nil {
 		return nil, err
 	}
 
+	existing, err := s.findUploadTarget(input)
+	if err != nil {
+		return nil, err
+	}
 	if existing == nil {
-		if configID != nil && *configID != 0 {
+		if input.hasConfigID() {
 			return nil, ErrConfigNotFound
 		}
-		cfg := &model.ServerConfig{
-			UserID:              userID,
-			AssetID:             assetID,
-			IdentityFingerprint: identityFingerprint,
-			EncryptedBlob:       encryptedBlob,
-			VectorClock:         vectorClock,
-			State:               model.ServerConfigStateActive,
-		}
-		if err := s.configRepo.Create(cfg); err != nil {
-			// 两台设备可能同时首次上传同一 AssetID。部分唯一索引只允许一个胜出；
-			// 失败方重新读取胜出记录并走正常向量钟判断，避免把可恢复竞争暴露为 500。
-			if assetID != "" {
-				winner, findErr := s.configRepo.FindByAssetIDAndUserID(assetID, userID)
-				if findErr == nil && winner != nil {
-					return s.Upload(userID, nil, assetID, identityFingerprint, encryptedBlob, vectorClock)
-				}
-			}
-			return nil, err
-		}
+		return s.createUpload(input)
+	}
+	return s.updateExistingUpload(existing, input)
+}
+
+func normalizeConfigUploadInput(
+	userID uint,
+	configID *uint,
+	assetID, identityFingerprint string,
+	encryptedBlob []byte,
+	vectorClock string,
+) (configUploadInput, error) {
+	input := configUploadInput{
+		userID:              userID,
+		configID:            configID,
+		assetID:             strings.TrimSpace(assetID),
+		identityFingerprint: strings.ToLower(strings.TrimSpace(identityFingerprint)),
+		encryptedBlob:       encryptedBlob,
+		vectorClock:         vectorClock,
+	}
+	if input.userID == 0 || len(input.encryptedBlob) == 0 || !validVectorClock(input.vectorClock) {
+		return configUploadInput{}, ErrConfigInvalidInput
+	}
+	if input.assetID != "" && !validUUID(input.assetID) {
+		return configUploadInput{}, ErrConfigInvalidInput
+	}
+	if input.identityFingerprint != "" && !validHexDigest(input.identityFingerprint) {
+		return configUploadInput{}, ErrConfigInvalidInput
+	}
+	return input, nil
+}
+
+func (input configUploadInput) hasConfigID() bool {
+	return input.configID != nil && *input.configID != 0
+}
+
+func (s *configService) findUploadTarget(input configUploadInput) (*model.ServerConfig, error) {
+	if input.hasConfigID() {
+		return s.configRepo.FindByIDAndUserID(*input.configID, input.userID)
+	}
+	if input.assetID != "" {
+		return s.configRepo.FindByAssetIDAndUserID(input.assetID, input.userID)
+	}
+	return nil, nil
+}
+
+func (s *configService) createUpload(input configUploadInput) (*model.ServerConfig, error) {
+	cfg := &model.ServerConfig{
+		UserID:              input.userID,
+		AssetID:             input.assetID,
+		IdentityFingerprint: input.identityFingerprint,
+		EncryptedBlob:       input.encryptedBlob,
+		VectorClock:         input.vectorClock,
+		State:               model.ServerConfigStateActive,
+	}
+	createErr := s.configRepo.Create(cfg)
+	if createErr == nil {
 		return cfg, nil
 	}
+	if input.assetID == "" {
+		return nil, createErr
+	}
+
+	// 两台设备可能同时首次上传同一 AssetID。唯一索引只允许一个胜出；
+	// 失败方重新读取胜出记录并走相同的向量钟判断，避免返回误导性的 500。
+	winner, findErr := s.configRepo.FindByAssetIDAndUserID(input.assetID, input.userID)
+	if findErr != nil {
+		return nil, findErr
+	}
+	if winner == nil {
+		return nil, createErr
+	}
+	return s.updateExistingUpload(winner, input)
+}
+
+func (s *configService) updateExistingUpload(existing *model.ServerConfig, input configUploadInput) (*model.ServerConfig, error) {
 
 	if existing.IsDeleted() {
 		return nil, ErrConfigInvalidState
 	}
-	if assetID != "" && existing.AssetID != "" && existing.AssetID != assetID {
+	if input.assetID != "" && existing.AssetID != "" && existing.AssetID != input.assetID {
 		return nil, ErrConfigInvalidInput
 	}
-	if existing.AssetID == "" && assetID != "" {
-		bound, err := s.configRepo.FindByAssetIDAndUserID(assetID, userID)
+	if existing.AssetID == "" && input.assetID != "" {
+		bound, err := s.configRepo.FindByAssetIDAndUserID(input.assetID, input.userID)
 		if err != nil {
 			return nil, err
 		}
@@ -126,41 +178,48 @@ func (s *configService) Upload(userID uint, configID *uint, assetID, identityFin
 		}
 	}
 	if existing.AssetID != "" {
-		updated, err := s.configRepo.MutateByAssetID(userID, existing.AssetID, func(current *model.ServerConfig) (bool, error) {
-			if current.IsDeleted() {
-				return false, ErrConfigInvalidState
-			}
-			relation, err := compareVectorClock(vectorClock, current.VectorClock)
-			if err != nil {
-				return false, ErrConfigInvalidInput
-			}
-			switch relation {
-			case vectorClockOlder, vectorClockConflict:
-				return false, ErrVectorClockConflict
-			case vectorClockEqual:
-				if bytes.Equal(current.EncryptedBlob, encryptedBlob) &&
-					(identityFingerprint == "" || current.IdentityFingerprint == identityFingerprint) {
-					return false, nil
-				}
-				return false, ErrVectorClockConflict
-			}
-			current.EncryptedBlob = encryptedBlob
-			current.VectorClock = vectorClock
-			if identityFingerprint != "" {
-				current.IdentityFingerprint = identityFingerprint
-			}
-			return true, nil
-		})
-		if err != nil {
-			return nil, err
-		}
-		if updated == nil {
-			return nil, ErrConfigNotFound
-		}
-		return updated, nil
+		return s.updateAssetBoundConfig(existing.AssetID, input)
 	}
+	return s.updateLegacyConfig(existing, input)
+}
 
-	relation, err := compareVectorClock(vectorClock, existing.VectorClock)
+func (s *configService) updateAssetBoundConfig(assetID string, input configUploadInput) (*model.ServerConfig, error) {
+	updated, err := s.configRepo.MutateByAssetID(input.userID, assetID, func(current *model.ServerConfig) (bool, error) {
+		if current.IsDeleted() {
+			return false, ErrConfigInvalidState
+		}
+		relation, err := compareVectorClock(input.vectorClock, current.VectorClock)
+		if err != nil {
+			return false, ErrConfigInvalidInput
+		}
+		switch relation {
+		case vectorClockOlder, vectorClockConflict:
+			return false, ErrVectorClockConflict
+		case vectorClockEqual:
+			if bytes.Equal(current.EncryptedBlob, input.encryptedBlob) &&
+				(input.identityFingerprint == "" || current.IdentityFingerprint == input.identityFingerprint) {
+				return false, nil
+			}
+			return false, ErrVectorClockConflict
+		}
+		current.EncryptedBlob = input.encryptedBlob
+		current.VectorClock = input.vectorClock
+		if input.identityFingerprint != "" {
+			current.IdentityFingerprint = input.identityFingerprint
+		}
+		return true, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	if updated == nil {
+		return nil, ErrConfigNotFound
+	}
+	return updated, nil
+}
+
+func (s *configService) updateLegacyConfig(existing *model.ServerConfig, input configUploadInput) (*model.ServerConfig, error) {
+	relation, err := compareVectorClock(input.vectorClock, existing.VectorClock)
 	if err != nil {
 		return nil, ErrConfigInvalidInput
 	}
@@ -168,20 +227,20 @@ func (s *configService) Upload(userID uint, configID *uint, assetID, identityFin
 		return nil, ErrVectorClockConflict
 	}
 	if relation == vectorClockEqual {
-		if bytes.Equal(existing.EncryptedBlob, encryptedBlob) {
+		if bytes.Equal(existing.EncryptedBlob, input.encryptedBlob) {
 			return existing, nil
 		}
 		return nil, ErrVectorClockConflict
 	}
 
 	if existing.AssetID == "" {
-		existing.AssetID = assetID
+		existing.AssetID = input.assetID
 	}
-	if identityFingerprint != "" {
-		existing.IdentityFingerprint = identityFingerprint
+	if input.identityFingerprint != "" {
+		existing.IdentityFingerprint = input.identityFingerprint
 	}
-	existing.EncryptedBlob = encryptedBlob
-	existing.VectorClock = vectorClock
+	existing.EncryptedBlob = input.encryptedBlob
+	existing.VectorClock = input.vectorClock
 	existing.State = model.ServerConfigStateActive
 	if err := s.configRepo.Update(existing); err != nil {
 		return nil, err

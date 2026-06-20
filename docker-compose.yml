@@ -22,7 +22,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ghcr.io/your-github-username/orbitterm-server:latest
+    image: ghcr.io/bighard-1/orbitterm-server:latest
     container_name: orbit-api
     restart: unless-stopped
     depends_on:

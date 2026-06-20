@@ -25,3 +25,19 @@ func TestIPRateLimitRejectsOverflow(t *testing.T) {
 		}
 	}
 }
+
+func TestPruneExpiredRateLimitBuckets(t *testing.T) {
+	now := time.Now()
+	buckets := map[string]rateLimitBucket{
+		"expired": {windowStart: now.Add(-2 * time.Minute), count: 10},
+		"active":  {windowStart: now.Add(-10 * time.Second), count: 1},
+	}
+
+	pruneExpiredRateLimitBuckets(buckets, now, time.Minute)
+	if _, exists := buckets["expired"]; exists {
+		t.Fatal("expired rate limit bucket was not removed")
+	}
+	if _, exists := buckets["active"]; !exists {
+		t.Fatal("active rate limit bucket was removed")
+	}
+}

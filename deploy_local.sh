@@ -26,7 +26,7 @@ echo "[1/4] 执行 Go 编译校验..."
 go build ./...
 echo "[完成] Go 编译校验通过。"
 
-DEFAULT_GHCR_USER="your-github-username"
+DEFAULT_GHCR_USER="bighard-1"
 GHCR_USER="${GHCR_USERNAME:-$DEFAULT_GHCR_USER}"
 
 if [[ "$GHCR_USER" == "$DEFAULT_GHCR_USER" ]]; then
