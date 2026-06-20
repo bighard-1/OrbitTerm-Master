@@ -86,6 +86,11 @@ func main() {
 
 	// 创建 Gin 引擎并注册路由。
 	engine := gin.Default()
+	// Gin 默认信任全部代理，攻击者可伪造 X-Forwarded-For。
+	// 这里只信任显式配置的 1Panel/反向代理地址；空列表表示不信任任何代理。
+	if err := engine.SetTrustedProxies(cfg.TrustedProxies); err != nil {
+		log.Fatalf("可信代理配置无效: %v", err)
+	}
 	router.Register(engine, authController, configController, adminController, healthController, jwtManager, userRepo)
 	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
 	worker.StartAssetTrashCleanupWorker(context.Background(), cfg, assetDeletionPolicyManager)

@@ -2,8 +2,10 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"gorm.io/driver/postgres"
@@ -26,6 +28,8 @@ type Config struct {
 	AdminAutoUnbanIntervalMinutes    int
 	AdminAutoUnbanBatchLimit         int
 	AssetTrashCleanupIntervalMinutes int
+	DatabaseLogLevel                 string
+	TrustedProxies                   []string
 }
 
 // Load 从环境变量读取配置并设置默认值。
@@ -44,6 +48,8 @@ func Load() Config {
 		AdminAutoUnbanIntervalMinutes:    getEnvAsInt("ADMIN_AUTO_UNBAN_INTERVAL_MINUTES", 10),
 		AdminAutoUnbanBatchLimit:         getEnvAsInt("ADMIN_AUTO_UNBAN_BATCH_LIMIT", 100),
 		AssetTrashCleanupIntervalMinutes: getEnvAsInt("ASSET_TRASH_CLEANUP_INTERVAL_MINUTES", 60),
+		DatabaseLogLevel:                 getEnv("DB_LOG_LEVEL", "warn"),
+		TrustedProxies:                   getEnvAsCSV("TRUSTED_PROXIES", []string{"127.0.0.1", "::1"}),
 	}
 }
 
@@ -51,7 +57,9 @@ func Load() Config {
 // Gorm 默认连接池已可满足多数场景，后续可根据压测结果进行细调。
 func NewDatabase(cfg Config) (*gorm.DB, error) {
 	db, err := gorm.Open(postgres.Open(cfg.DatabaseURL), &gorm.Config{
-		Logger: logger.Default.LogMode(logger.Info),
+		// 生产环境默认不输出常规 SQL；即使临时开启 info，参数也会被占位符隐藏。
+		// 需要临时排障时可显式设置 DB_LOG_LEVEL=info，排障结束后应立即恢复。
+		Logger: newDatabaseLogger(cfg.DatabaseLogLevel),
 		NowFunc: func() time.Time {
 			return time.Now().UTC()
 		},
@@ -60,6 +68,32 @@ func NewDatabase(cfg Config) (*gorm.DB, error) {
 		return nil, fmt.Errorf("gorm open postgres failed: %w", err)
 	}
 	return db, nil
+}
+
+func newDatabaseLogger(level string) logger.Interface {
+	return logger.New(
+		log.New(os.Stdout, "\r\n", log.LstdFlags),
+		logger.Config{
+			SlowThreshold:             200 * time.Millisecond,
+			LogLevel:                  databaseLogLevel(level),
+			IgnoreRecordNotFoundError: true,
+			ParameterizedQueries:      true,
+			Colorful:                  false,
+		},
+	)
+}
+
+func databaseLogLevel(value string) logger.LogLevel {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "silent":
+		return logger.Silent
+	case "error":
+		return logger.Error
+	case "info":
+		return logger.Info
+	default:
+		return logger.Warn
+	}
 }
 
 func getEnv(key, fallback string) string {
@@ -85,4 +119,19 @@ func getEnvAsBool(key string, fallback bool) bool {
 		return fallback
 	}
 	return parsed
+}
+
+func getEnvAsCSV(key string, fallback []string) []string {
+	value, exists := os.LookupEnv(key)
+	if !exists {
+		return append([]string(nil), fallback...)
+	}
+
+	items := make([]string, 0)
+	for _, item := range strings.Split(value, ",") {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			items = append(items, trimmed)
+		}
+	}
+	return items
 }

@@ -81,6 +81,8 @@ OrbitTerm-Server
 - `JWT_REFRESH_EXPIRE_DAYS`（默认 `30`）
 - `JWT_EXPIRE_HOURS`（兼容旧配置，未设置新变量时回退）
 - `ADMIN_BOOTSTRAP_TOKEN`（无默认值；用于首次创建 `super_admin`，生产必须配置高强度随机值）
+- `DB_LOG_LEVEL`（默认 `warn`；日志参数会以占位符脱敏，生产环境仍不应长期设置为 `info`）
+- `TRUSTED_PROXIES`（默认 `127.0.0.1,::1`；使用 1Panel 反向代理时填写其容器 IP/CIDR，不使用代理可设为空）
 
 ## 五、接口
 

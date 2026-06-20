@@ -144,6 +144,104 @@ func TestConfigServiceRejectsStaleRestore(t *testing.T) {
 	}
 }
 
+func TestConfigServiceDeletionConflictMatrix(t *testing.T) {
+	tests := []struct {
+		name      string
+		incoming  string
+		wantError bool
+	}{
+		{name: "older delete is rejected", incoming: `{"mac":1}`, wantError: true},
+		{name: "equal delete is rejected", incoming: `{"mac":2}`, wantError: true},
+		{name: "strictly newer delete wins", incoming: `{"mac":3}`},
+		{name: "concurrent delete wins and merges", incoming: `{"iphone":1}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := newFakeConfigRepo(&model.ServerConfig{
+				ID: 1, UserID: 1, AssetID: testAssetID, EncryptedBlob: []byte("cipher"),
+				VectorClock: `{"mac":2}`, State: model.ServerConfigStateActive,
+			})
+			svc := &configService{configRepo: repo, policy: fakeAssetDeletionPolicyReader{policy: model.DefaultAssetDeletionPolicy()}, now: time.Now}
+			result, err := svc.DeleteAsset(1, AssetMutationInput{
+				AssetID: testAssetID, DeviceID: testDeviceID2, OperationID: testDeleteOp, VectorClock: test.incoming,
+			})
+			if test.wantError {
+				if !errors.Is(err, ErrVectorClockConflict) {
+					t.Fatalf("expected vector conflict, got result=%+v err=%v", result, err)
+				}
+				return
+			}
+			if err != nil || result.State != model.ServerConfigStateDeleted {
+				t.Fatalf("delete did not win: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
+func TestConfigServiceRestoreAndPurgeRequireStrictlyNewerClock(t *testing.T) {
+	for _, operation := range []string{"restore", "purge"} {
+		for _, test := range []struct {
+			name      string
+			clock     string
+			wantError bool
+		}{
+			{name: "older", clock: `{"mac":1}`, wantError: true},
+			{name: "equal", clock: `{"mac":2}`, wantError: true},
+			{name: "concurrent", clock: `{"iphone":1}`, wantError: true},
+			{name: "newer", clock: `{"mac":3}`},
+		} {
+			t.Run(operation+"_"+test.name, func(t *testing.T) {
+				now := time.Now().UTC()
+				repo := newFakeConfigRepo(&model.ServerConfig{
+					ID: 1, UserID: 1, AssetID: testAssetID, EncryptedBlob: []byte("cipher"),
+					VectorClock: `{"mac":2}`, State: model.ServerConfigStateDeleted, DeletedAt: &now,
+				})
+				svc := &configService{configRepo: repo, policy: fakeAssetDeletionPolicyReader{policy: model.DefaultAssetDeletionPolicy()}, now: time.Now}
+				input := AssetMutationInput{
+					AssetID: testAssetID, DeviceID: testDeviceID, VectorClock: test.clock,
+				}
+				var result *model.ServerConfig
+				var err error
+				if operation == "restore" {
+					input.OperationID = testRestoreOp
+					result, err = svc.RestoreAsset(1, input)
+				} else {
+					input.OperationID = testPurgeOp
+					result, err = svc.PurgeAsset(1, input)
+				}
+				if test.wantError {
+					if !errors.Is(err, ErrVectorClockConflict) {
+						t.Fatalf("expected vector conflict, got result=%+v err=%v", result, err)
+					}
+					return
+				}
+				if err != nil {
+					t.Fatalf("strictly newer %s failed: %v", operation, err)
+				}
+				expectedState := model.ServerConfigStateActive
+				if operation == "purge" {
+					expectedState = model.ServerConfigStatePurged
+				}
+				if result.State != expectedState {
+					t.Fatalf("unexpected state: got %s want %s", result.State, expectedState)
+				}
+			})
+		}
+	}
+}
+
+func TestConfigServiceRejectsUploadOverTombstone(t *testing.T) {
+	repo := newFakeConfigRepo(&model.ServerConfig{
+		ID: 1, UserID: 1, AssetID: testAssetID, EncryptedBlob: []byte("cipher"),
+		VectorClock: `{"mac":2}`, State: model.ServerConfigStateDeleted,
+	})
+	svc := NewConfigService(repo)
+	_, err := svc.Upload(1, nil, testAssetID, "", []byte("stale-update"), `{"mac":3}`)
+	if !errors.Is(err, ErrConfigInvalidState) {
+		t.Fatalf("deleted asset must require explicit restore, got %v", err)
+	}
+}
+
 func TestConfigServiceBackfillsAssetIDWithoutRecreatingLegacyRecord(t *testing.T) {
 	legacy := &model.ServerConfig{
 		ID: 17, UserID: 3, EncryptedBlob: []byte("old-cipher"),
