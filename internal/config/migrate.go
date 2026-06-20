@@ -18,6 +18,8 @@ func MigrateDatabase(db *gorm.DB) error {
 	if err := db.AutoMigrate(
 		&model.User{},
 		&model.ServerConfig{},
+		&model.ConfigSyncChange{},
+		&model.SyncDeviceState{},
 		&model.AdminAuditLog{},
 		&model.SystemSetting{},
 	); err != nil {
@@ -39,6 +41,33 @@ func MigrateDatabase(db *gorm.DB) error {
 		WHERE asset_id <> ''
 	`).Error; err != nil {
 		return fmt.Errorf("create server config asset identity index: %w", err)
+	}
+
+	// 为升级前的配置建立初始修订记录，使新版客户端第一次 cursor=0 时能够完整拉取。
+	if err := db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Exec(`
+			INSERT INTO config_sync_changes (user_id, config_id, asset_id, state, operation_id, changed_at)
+			SELECT sc.user_id, sc.id, sc.asset_id, sc.state, sc.last_operation_id, sc.updated_at
+			FROM server_configs sc
+			WHERE sc.server_revision = 0
+			  AND NOT EXISTS (
+				SELECT 1 FROM config_sync_changes c WHERE c.config_id = sc.id
+			  )
+		`).Error; err != nil {
+			return err
+		}
+		return tx.Exec(`
+			UPDATE server_configs sc
+			SET server_revision = latest.revision
+			FROM (
+				SELECT config_id, MAX(id) AS revision
+				FROM config_sync_changes
+				GROUP BY config_id
+			) latest
+			WHERE sc.id = latest.config_id AND sc.server_revision = 0
+		`).Error
+	}); err != nil {
+		return fmt.Errorf("backfill config sync revisions: %w", err)
 	}
 
 	return nil

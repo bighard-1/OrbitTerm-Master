@@ -28,6 +28,7 @@ func NewConfigController(configService service.ConfigService) *ConfigController 
 type uploadConfigRequest struct {
 	ID                  *uint  `json:"id,omitempty"`
 	AssetID             string `json:"asset_id,omitempty"`
+	IdentityFingerprint string `json:"identity_fingerprint,omitempty"`
 	EncryptedBlobBase64 string `json:"encrypted_blob_base64" binding:"required"`
 	VectorClock         string `json:"vector_clock" binding:"required"`
 }
@@ -66,7 +67,7 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.configService.Upload(userID, req.ID, req.AssetID, encryptedBlob, req.VectorClock)
+	result, err := c.configService.Upload(userID, req.ID, req.AssetID, req.IdentityFingerprint, encryptedBlob, req.VectorClock)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrConfigInvalidInput):
@@ -157,6 +158,8 @@ func (c *ConfigController) Delete(ctx *gin.Context) {
 			common.Error(ctx, http.StatusBadRequest, "删除参数非法")
 		case errors.Is(err, service.ErrConfigNotFound):
 			common.Error(ctx, http.StatusNotFound, "配置不存在")
+		case errors.Is(err, service.ErrConfigInvalidState):
+			common.Error(ctx, http.StatusConflict, "该资产已迁移到新版同步协议，请使用最近删除功能")
 		default:
 			common.Error(ctx, http.StatusInternalServerError, "删除失败")
 		}
@@ -183,6 +186,7 @@ func toConfigResponse(cfg *model.ServerConfig) gin.H {
 		"id":                    cfg.ID,
 		"user_id":               cfg.UserID,
 		"asset_id":              cfg.AssetID,
+		"identity_fingerprint":  cfg.IdentityFingerprint,
 		"encrypted_blob_base64": base64.StdEncoding.EncodeToString(cfg.EncryptedBlob),
 		"vector_clock":          cfg.VectorClock,
 		"state":                 cfg.State,
@@ -190,6 +194,7 @@ func toConfigResponse(cfg *model.ServerConfig) gin.H {
 		"purge_after":           cfg.PurgeAfter,
 		"deleted_by_device_id":  cfg.DeletedByDeviceID,
 		"last_operation_id":     cfg.LastOperationID,
+		"server_revision":       cfg.ServerRevision,
 		"updated_at":            cfg.UpdatedAt,
 	}
 }

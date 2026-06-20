@@ -34,6 +34,18 @@ func validUUID(value string) bool {
 	return true
 }
 
+func validHexDigest(value string) bool {
+	if len(value) != 64 {
+		return false
+	}
+	for _, char := range value {
+		if !((char >= '0' && char <= '9') || (char >= 'a' && char <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
 func mergeVectorClocks(leftJSON, rightJSON string) (string, error) {
 	left, err := parseVectorClockJSON(leftJSON)
 	if err != nil {

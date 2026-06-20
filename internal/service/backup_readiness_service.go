@@ -110,10 +110,12 @@ func (s *backupReadinessService) databaseStatus() (DatabaseBackupStatus, []strin
 	warnings := make([]string, 0)
 	counts := map[string]int64{}
 	tables := map[string]any{
-		"users":            &model.User{},
-		"server_configs":   &model.ServerConfig{},
-		"admin_audit_logs": &model.AdminAuditLog{},
-		"system_settings":  &model.SystemSetting{},
+		"users":               &model.User{},
+		"server_configs":      &model.ServerConfig{},
+		"config_sync_changes": &model.ConfigSyncChange{},
+		"sync_device_states":  &model.SyncDeviceState{},
+		"admin_audit_logs":    &model.AdminAuditLog{},
+		"system_settings":     &model.SystemSetting{},
 	}
 
 	for table, modelRef := range tables {
@@ -151,7 +153,7 @@ func (s *backupReadinessService) environmentChecks() []EnvironmentCheck {
 
 func recommendedBackupItems() []BackupItem {
 	return []BackupItem{
-		{Name: "PostgreSQL 数据库快照", Required: true, Description: "包含用户、云端密文配置、审计日志与系统策略。"},
+		{Name: "PostgreSQL 数据库快照", Required: true, Description: "包含用户、云端密文配置、同步修订、设备确认水位、审计日志与系统策略。"},
 		{Name: "脱敏环境变量快照", Required: true, Description: "记录变量是否存在与脱敏形态，密钥原文需由管理员在安全密码库保存。"},
 		{Name: "后端镜像版本号", Required: true, Description: "记录 GHCR 镜像 tag/digest，便于回滚到一致版本。"},
 		{Name: "1Panel 反向代理与域名配置", Required: true, Description: "包含 HTTPS 证书来源、server.orbitterm.com 指向与容器端口映射。"},

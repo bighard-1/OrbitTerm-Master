@@ -52,3 +52,56 @@
 同一 `operation_id` 可安全重试。服务端会在事务内锁定目标资产，重复删除不会延长最近删除期限。
 
 旧版 `DELETE /api/v1/config/:id` 暂时保留物理删除语义，仅供迁移期客户端使用；新版客户端不得继续调用该接口。
+
+## 增量同步游标
+
+新版客户端使用：
+
+- `GET /api/v1/config/sync/pull?cursor=0&limit=100`
+- `POST /api/v1/config/sync/ack`
+
+每次配置创建、更新、删除、恢复或清除密文时，服务端都会在同一数据库事务内生成递增的 `server_revision`。拉取响应同时包含：
+
+```json
+{
+  "items": [],
+  "next_cursor": 123,
+  "has_more": false,
+  "reset_required": false
+}
+```
+
+客户端必须按以下顺序处理：
+
+1. 按返回顺序应用 `active / deleted / purged` 快照。
+2. 持久化 `next_cursor`。
+3. 所有本地写入成功后调用 `/sync/ack` 确认修订号。
+4. `has_more=true` 时继续使用新的游标拉取。
+5. `reset_required=true` 表示服务端数据可能从备份恢复，客户端必须清空游标并从 0 重新对账，不能静默忽略。
+
+确认请求示例：
+
+```json
+{
+  "device_id": "客户端稳定设备 UUID",
+  "revision": 123,
+  "platform": "ios",
+  "client_version": "1.0.0"
+}
+```
+
+确认水位只能单调增加，且不能超过该用户服务端当前存在的最大修订号。
+
+已回填 `AssetID` 的资产受到迁移保护，旧版数字 ID 删除接口会返回冲突而不会物理删除。只有尚未迁移的历史记录继续保留旧删除行为。
+
+## 删除后重新添加的身份匹配
+
+新版上传请求可附加 `identity_fingerprint`。它必须是客户端使用账户同步密钥，对标准化后的“协议、主机、端口、用户名”计算得到的 HMAC-SHA256 十六进制摘要。禁止上传这些字段的普通 SHA256 或任何连接信息明文。
+
+添加资产前，客户端可调用：
+
+```text
+GET /api/v1/config/identity-match?fingerprint=64位HMAC十六进制摘要
+```
+
+如果匹配到 `deleted`，客户端应优先提示“恢复并更新”或“仍作为新资产添加”。服务端不对指纹建立唯一约束，因此用户明确选择新资产时仍可使用新的 AssetID 创建独立记录。即使可恢复密文已清除，最小墓碑仍可保留该不可逆指纹，用于避免无提示重复添加。

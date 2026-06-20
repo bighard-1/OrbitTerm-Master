@@ -1,6 +1,7 @@
 package service
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"time"
@@ -19,13 +20,16 @@ var (
 
 // ConfigService 提供密文配置同步与墓碑生命周期能力。
 type ConfigService interface {
-	Upload(userID uint, configID *uint, assetID string, encryptedBlob []byte, vectorClock string) (*model.ServerConfig, error)
+	Upload(userID uint, configID *uint, assetID, identityFingerprint string, encryptedBlob []byte, vectorClock string) (*model.ServerConfig, error)
 	Pull(userID uint) ([]model.ServerConfig, error)
 	Delete(userID, configID uint) error
 	DeleteAsset(userID uint, input AssetMutationInput) (*model.ServerConfig, error)
 	ListTrash(userID uint, limit, offset int) (*TrashPage, error)
 	RestoreAsset(userID uint, input AssetMutationInput) (*model.ServerConfig, error)
 	PurgeAsset(userID uint, input AssetMutationInput) (*model.ServerConfig, error)
+	PullChanges(userID uint, afterRevision uint64, limit int) (*SyncPullPage, error)
+	AcknowledgeSync(userID uint, input SyncAcknowledgementInput) error
+	FindIdentityMatches(userID uint, fingerprint string) ([]model.ServerConfig, error)
 }
 
 type configService struct {
@@ -56,12 +60,16 @@ func (defaultAssetDeletionPolicyReader) GetAssetDeletionPolicy() (model.AssetDel
 
 // Upload 保持旧协议兼容，同时允许新版客户端回填稳定 AssetID。
 // 已进入 deleted/purged 的资产只能通过显式恢复接口重新激活。
-func (s *configService) Upload(userID uint, configID *uint, assetID string, encryptedBlob []byte, vectorClock string) (*model.ServerConfig, error) {
+func (s *configService) Upload(userID uint, configID *uint, assetID, identityFingerprint string, encryptedBlob []byte, vectorClock string) (*model.ServerConfig, error) {
 	assetID = strings.TrimSpace(assetID)
+	identityFingerprint = strings.ToLower(strings.TrimSpace(identityFingerprint))
 	if userID == 0 || len(encryptedBlob) == 0 || !validVectorClock(vectorClock) {
 		return nil, ErrConfigInvalidInput
 	}
 	if assetID != "" && !validUUID(assetID) {
+		return nil, ErrConfigInvalidInput
+	}
+	if identityFingerprint != "" && !validHexDigest(identityFingerprint) {
 		return nil, ErrConfigInvalidInput
 	}
 
@@ -81,13 +89,22 @@ func (s *configService) Upload(userID uint, configID *uint, assetID string, encr
 			return nil, ErrConfigNotFound
 		}
 		cfg := &model.ServerConfig{
-			UserID:        userID,
-			AssetID:       assetID,
-			EncryptedBlob: encryptedBlob,
-			VectorClock:   vectorClock,
-			State:         model.ServerConfigStateActive,
+			UserID:              userID,
+			AssetID:             assetID,
+			IdentityFingerprint: identityFingerprint,
+			EncryptedBlob:       encryptedBlob,
+			VectorClock:         vectorClock,
+			State:               model.ServerConfigStateActive,
 		}
 		if err := s.configRepo.Create(cfg); err != nil {
+			// 两台设备可能同时首次上传同一 AssetID。部分唯一索引只允许一个胜出；
+			// 失败方重新读取胜出记录并走正常向量钟判断，避免把可恢复竞争暴露为 500。
+			if assetID != "" {
+				winner, findErr := s.configRepo.FindByAssetIDAndUserID(assetID, userID)
+				if findErr == nil && winner != nil {
+					return s.Upload(userID, nil, assetID, identityFingerprint, encryptedBlob, vectorClock)
+				}
+			}
 			return nil, err
 		}
 		return cfg, nil
@@ -108,6 +125,40 @@ func (s *configService) Upload(userID uint, configID *uint, assetID string, encr
 			return nil, ErrVectorClockConflict
 		}
 	}
+	if existing.AssetID != "" {
+		updated, err := s.configRepo.MutateByAssetID(userID, existing.AssetID, func(current *model.ServerConfig) (bool, error) {
+			if current.IsDeleted() {
+				return false, ErrConfigInvalidState
+			}
+			relation, err := compareVectorClock(vectorClock, current.VectorClock)
+			if err != nil {
+				return false, ErrConfigInvalidInput
+			}
+			switch relation {
+			case vectorClockOlder, vectorClockConflict:
+				return false, ErrVectorClockConflict
+			case vectorClockEqual:
+				if bytes.Equal(current.EncryptedBlob, encryptedBlob) &&
+					(identityFingerprint == "" || current.IdentityFingerprint == identityFingerprint) {
+					return false, nil
+				}
+				return false, ErrVectorClockConflict
+			}
+			current.EncryptedBlob = encryptedBlob
+			current.VectorClock = vectorClock
+			if identityFingerprint != "" {
+				current.IdentityFingerprint = identityFingerprint
+			}
+			return true, nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		if updated == nil {
+			return nil, ErrConfigNotFound
+		}
+		return updated, nil
+	}
 
 	relation, err := compareVectorClock(vectorClock, existing.VectorClock)
 	if err != nil {
@@ -116,9 +167,18 @@ func (s *configService) Upload(userID uint, configID *uint, assetID string, encr
 	if relation == vectorClockOlder || relation == vectorClockConflict {
 		return nil, ErrVectorClockConflict
 	}
+	if relation == vectorClockEqual {
+		if bytes.Equal(existing.EncryptedBlob, encryptedBlob) {
+			return existing, nil
+		}
+		return nil, ErrVectorClockConflict
+	}
 
 	if existing.AssetID == "" {
 		existing.AssetID = assetID
+	}
+	if identityFingerprint != "" {
+		existing.IdentityFingerprint = identityFingerprint
 	}
 	existing.EncryptedBlob = encryptedBlob
 	existing.VectorClock = vectorClock
@@ -127,6 +187,14 @@ func (s *configService) Upload(userID uint, configID *uint, assetID string, encr
 		return nil, err
 	}
 	return existing, nil
+}
+
+func (s *configService) FindIdentityMatches(userID uint, fingerprint string) ([]model.ServerConfig, error) {
+	fingerprint = strings.ToLower(strings.TrimSpace(fingerprint))
+	if userID == 0 || !validHexDigest(fingerprint) {
+		return nil, ErrConfigInvalidInput
+	}
+	return s.configRepo.ListByIdentityFingerprint(userID, fingerprint)
 }
 
 // Pull 是旧客户端兼容入口，只返回 active 记录，避免旧版本误把墓碑导入成正常资产。
@@ -144,6 +212,9 @@ func (s *configService) Delete(userID, configID uint) error {
 	}
 	deleted, err := s.configRepo.DeleteByIDAndUserID(configID, userID)
 	if err != nil {
+		if errors.Is(err, repository.ErrLegacyDeleteProtected) {
+			return ErrConfigInvalidState
+		}
 		return err
 	}
 	if !deleted {

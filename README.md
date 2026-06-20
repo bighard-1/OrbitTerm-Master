@@ -95,6 +95,9 @@ OrbitTerm-Server
 - `POST /api/v1/config/assets/:asset_id/delete`
 - `POST /api/v1/config/assets/:asset_id/restore`
 - `POST /api/v1/config/assets/:asset_id/purge`
+- `GET /api/v1/config/sync/pull?cursor=&limit=`
+- `POST /api/v1/config/sync/ack`
+- `GET /api/v1/config/identity-match?fingerprint=`
 - `GET /api/v1/admin/dashboard/overview`
 - `GET /api/v1/admin/system/runtime`
 - `GET /api/v1/admin/system/audit-policy`
@@ -141,4 +144,4 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 go run .
 ```
 
-启动时会自动执行 `User`、`ServerConfig`、`AdminAuditLog` 与 `SystemSetting` 的表迁移。
+启动时会自动执行用户、密文配置、同步修订、设备确认水位、审计日志与系统策略的兼容迁移。

@@ -65,12 +65,22 @@ func (f fakeServerConfigCounter) FindByIDAndUserID(_, _ uint) (*model.ServerConf
 func (f fakeServerConfigCounter) FindByAssetIDAndUserID(_ string, _ uint) (*model.ServerConfig, error) {
 	return nil, nil
 }
+func (f fakeServerConfigCounter) ListByIdentityFingerprint(_ uint, _ string) ([]model.ServerConfig, error) {
+	return nil, nil
+}
 func (f fakeServerConfigCounter) MutateByAssetID(_ uint, _ string, _ func(*model.ServerConfig) (bool, error)) (*model.ServerConfig, error) {
 	return nil, nil
 }
 func (f fakeServerConfigCounter) ListByUserID(_ uint) ([]model.ServerConfig, error) { return nil, nil }
 func (f fakeServerConfigCounter) ListTrashByUserID(_ uint, _, _ int) ([]model.ServerConfig, int64, error) {
 	return nil, 0, nil
+}
+func (f fakeServerConfigCounter) ListChangedByUserID(_ uint, _ uint64, _ int) ([]model.ServerConfig, bool, error) {
+	return nil, false, nil
+}
+func (f fakeServerConfigCounter) MaxRevisionByUserID(_ uint) (uint64, error) { return 0, nil }
+func (f fakeServerConfigCounter) AcknowledgeDevice(_ uint, _ string, _ uint64, _, _ string, _ time.Time) error {
+	return nil
 }
 func (f fakeServerConfigCounter) CountAll() (int64, error)                    { return f.count, nil }
 func (f fakeServerConfigCounter) DeleteByIDAndUserID(_, _ uint) (bool, error) { return false, nil }

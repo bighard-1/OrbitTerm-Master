@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"orbitterm-server/internal/model"
+	"orbitterm-server/internal/repository"
 )
 
 const (
@@ -152,7 +153,7 @@ func TestConfigServiceBackfillsAssetIDWithoutRecreatingLegacyRecord(t *testing.T
 	svc := NewConfigService(repo)
 	configID := uint(17)
 
-	updated, err := svc.Upload(3, &configID, testAssetID, []byte("new-cipher"), `{"mac":2}`)
+	updated, err := svc.Upload(3, &configID, testAssetID, "", []byte("new-cipher"), `{"mac":2}`)
 	if err != nil {
 		t.Fatalf("Upload failed: %v", err)
 	}
@@ -161,6 +162,21 @@ func TestConfigServiceBackfillsAssetIDWithoutRecreatingLegacyRecord(t *testing.T
 	}
 	if len(repo.items) != 1 {
 		t.Fatalf("backfill must not create a duplicate record, got %d", len(repo.items))
+	}
+}
+
+func TestConfigServiceProtectsMigratedAssetFromLegacyPhysicalDelete(t *testing.T) {
+	repo := newFakeConfigRepo(&model.ServerConfig{
+		ID: 21, UserID: 3, AssetID: testAssetID, State: model.ServerConfigStateActive,
+	})
+	svc := NewConfigService(repo)
+
+	err := svc.Delete(3, 21)
+	if !errors.Is(err, ErrConfigInvalidState) {
+		t.Fatalf("expected migrated asset protection, got %v", err)
+	}
+	if len(repo.items) != 1 {
+		t.Fatal("legacy delete must not remove a migrated asset")
 	}
 }
 
@@ -176,19 +192,26 @@ func (f fakeAssetDeletionPolicyReader) GetAssetDeletionPolicy() (model.AssetDele
 type fakeConfigRepo struct {
 	items         map[string]*model.ServerConfig
 	mutationCount int
+	nextRevision  uint64
+	ackRevision   uint64
 }
 
 func newFakeConfigRepo(items ...*model.ServerConfig) *fakeConfigRepo {
-	repo := &fakeConfigRepo{items: make(map[string]*model.ServerConfig)}
+	repo := &fakeConfigRepo{items: make(map[string]*model.ServerConfig), nextRevision: 1}
 	for _, item := range items {
 		copy := *item
 		copy.EncryptedBlob = append([]byte(nil), item.EncryptedBlob...)
 		repo.items[item.AssetID] = &copy
+		if item.ServerRevision >= repo.nextRevision {
+			repo.nextRevision = item.ServerRevision + 1
+		}
 	}
 	return repo
 }
 
 func (f *fakeConfigRepo) Create(config *model.ServerConfig) error {
+	config.ServerRevision = f.nextRevision
+	f.nextRevision++
 	copy := *config
 	f.items[config.AssetID] = &copy
 	return nil
@@ -199,6 +222,8 @@ func (f *fakeConfigRepo) Update(config *model.ServerConfig) error {
 			delete(f.items, assetID)
 		}
 	}
+	config.ServerRevision = f.nextRevision
+	f.nextRevision++
 	copy := *config
 	f.items[config.AssetID] = &copy
 	return nil
@@ -220,6 +245,15 @@ func (f *fakeConfigRepo) FindByAssetIDAndUserID(assetID string, userID uint) (*m
 	copy := *item
 	return &copy, nil
 }
+func (f *fakeConfigRepo) ListByIdentityFingerprint(userID uint, fingerprint string) ([]model.ServerConfig, error) {
+	items := make([]model.ServerConfig, 0)
+	for _, item := range f.items {
+		if item.UserID == userID && item.IdentityFingerprint == fingerprint {
+			items = append(items, *item)
+		}
+	}
+	return items, nil
+}
 func (f *fakeConfigRepo) MutateByAssetID(userID uint, assetID string, mutate func(*model.ServerConfig) (bool, error)) (*model.ServerConfig, error) {
 	item := f.items[assetID]
 	if item == nil || item.UserID != userID {
@@ -233,6 +267,8 @@ func (f *fakeConfigRepo) MutateByAssetID(userID uint, assetID string, mutate fun
 	}
 	if changed {
 		f.mutationCount++
+		copy.ServerRevision = f.nextRevision
+		f.nextRevision++
 		stored := copy
 		f.items[assetID] = &stored
 	}
@@ -264,10 +300,48 @@ func (f *fakeConfigRepo) ListTrashByUserID(userID uint, limit, offset int) ([]mo
 	}
 	return items[offset:end], total, nil
 }
+func (f *fakeConfigRepo) ListChangedByUserID(userID uint, afterRevision uint64, limit int) ([]model.ServerConfig, bool, error) {
+	items := make([]model.ServerConfig, 0)
+	for _, item := range f.items {
+		if item.UserID == userID && item.ServerRevision > afterRevision {
+			items = append(items, *item)
+		}
+	}
+	for i := 0; i < len(items); i++ {
+		for j := i + 1; j < len(items); j++ {
+			if items[j].ServerRevision < items[i].ServerRevision {
+				items[i], items[j] = items[j], items[i]
+			}
+		}
+	}
+	hasMore := len(items) > limit
+	if hasMore {
+		items = items[:limit]
+	}
+	return items, hasMore, nil
+}
+func (f *fakeConfigRepo) MaxRevisionByUserID(userID uint) (uint64, error) {
+	var max uint64
+	for _, item := range f.items {
+		if item.UserID == userID && item.ServerRevision > max {
+			max = item.ServerRevision
+		}
+	}
+	return max, nil
+}
+func (f *fakeConfigRepo) AcknowledgeDevice(_ uint, _ string, revision uint64, _, _ string, _ time.Time) error {
+	if revision > f.ackRevision {
+		f.ackRevision = revision
+	}
+	return nil
+}
 func (f *fakeConfigRepo) CountAll() (int64, error) { return int64(len(f.items)), nil }
 func (f *fakeConfigRepo) DeleteByIDAndUserID(id, userID uint) (bool, error) {
 	for assetID, item := range f.items {
 		if item.ID == id && item.UserID == userID {
+			if item.AssetID != "" {
+				return false, repository.ErrLegacyDeleteProtected
+			}
 			delete(f.items, assetID)
 			return true, nil
 		}
