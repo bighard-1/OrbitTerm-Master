@@ -62,9 +62,18 @@ func (f fakeServerConfigCounter) Update(_ *model.ServerConfig) error { return ni
 func (f fakeServerConfigCounter) FindByIDAndUserID(_, _ uint) (*model.ServerConfig, error) {
 	return nil, nil
 }
+func (f fakeServerConfigCounter) FindByAssetIDAndUserID(_ string, _ uint) (*model.ServerConfig, error) {
+	return nil, nil
+}
+func (f fakeServerConfigCounter) MutateByAssetID(_ uint, _ string, _ func(*model.ServerConfig) (bool, error)) (*model.ServerConfig, error) {
+	return nil, nil
+}
 func (f fakeServerConfigCounter) ListByUserID(_ uint) ([]model.ServerConfig, error) { return nil, nil }
-func (f fakeServerConfigCounter) CountAll() (int64, error)                          { return f.count, nil }
-func (f fakeServerConfigCounter) DeleteByIDAndUserID(_, _ uint) (bool, error)       { return false, nil }
+func (f fakeServerConfigCounter) ListTrashByUserID(_ uint, _, _ int) ([]model.ServerConfig, int64, error) {
+	return nil, 0, nil
+}
+func (f fakeServerConfigCounter) CountAll() (int64, error)                    { return f.count, nil }
+func (f fakeServerConfigCounter) DeleteByIDAndUserID(_, _ uint) (bool, error) { return false, nil }
 
 type fakeBackupReadinessService struct {
 	report BackupReadinessReport

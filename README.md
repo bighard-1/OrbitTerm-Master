@@ -52,8 +52,10 @@ OrbitTerm-Server
 - `ServerConfig`
   - `ID`：主键
   - `UserID`：关联用户 ID
+  - `AssetID`：客户端生成的跨端稳定资产 UUID
   - `EncryptedBlob`：加密后的配置数据块（`bytea`）
   - `VectorClock`：版本号（使用字符串存储 JSON 结构，便于多端冲突处理）
+  - `State`：`active / deleted / purged`，用于最近删除与防复活墓碑
   - `UpdatedAt`：最后更新时间
 
 - `SystemSetting`
@@ -87,6 +89,12 @@ OrbitTerm-Server
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
 - `GET /api/v1/auth/recovery-info`
+- `POST /api/v1/config/upload`
+- `GET /api/v1/config/pull`
+- `GET /api/v1/config/trash`
+- `POST /api/v1/config/assets/:asset_id/delete`
+- `POST /api/v1/config/assets/:asset_id/restore`
+- `POST /api/v1/config/assets/:asset_id/purge`
 - `GET /api/v1/admin/dashboard/overview`
 - `GET /api/v1/admin/system/runtime`
 - `GET /api/v1/admin/system/audit-policy`

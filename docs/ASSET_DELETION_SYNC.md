@@ -27,3 +27,28 @@
 4. 最后启用最近删除清理任务和管理端策略配置。
 
 旧客户端在迁移阶段继续使用原有接口，不会因新增字段而停止同步。
+
+## 当前墓碑 API
+
+以下接口均要求 Bearer Token：
+
+- `GET /api/v1/config/trash?limit=100&offset=0`：分页读取仍可恢复的记录。
+- `POST /api/v1/config/assets/:asset_id/delete`：移入最近删除。
+- `POST /api/v1/config/assets/:asset_id/restore`：恢复资产。
+- `POST /api/v1/config/assets/:asset_id/purge`：清除密文并保留最小墓碑。
+
+删除和恢复请求体：
+
+```json
+{
+  "device_id": "客户端稳定设备 UUID",
+  "operation_id": "每次操作新生成的 UUID",
+  "vector_clock": "{\"device-id\":2}"
+}
+```
+
+永久删除还必须附加 `"confirmation": "CONFIRM"`。
+
+同一 `operation_id` 可安全重试。服务端会在事务内锁定目标资产，重复删除不会延长最近删除期限。
+
+旧版 `DELETE /api/v1/config/:id` 暂时保留物理删除语义，仅供迁移期客户端使用；新版客户端不得继续调用该接口。

@@ -27,6 +27,7 @@ func NewConfigController(configService service.ConfigService) *ConfigController 
 // 后端不负责解密，仅负责存储加密后的密文。
 type uploadConfigRequest struct {
 	ID                  *uint  `json:"id,omitempty"`
+	AssetID             string `json:"asset_id,omitempty"`
 	EncryptedBlobBase64 string `json:"encrypted_blob_base64" binding:"required"`
 	VectorClock         string `json:"vector_clock" binding:"required"`
 }
@@ -65,7 +66,7 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 		return
 	}
 
-	result, err := c.configService.Upload(userID, req.ID, encryptedBlob, req.VectorClock)
+	result, err := c.configService.Upload(userID, req.ID, req.AssetID, encryptedBlob, req.VectorClock)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrConfigInvalidInput):
@@ -74,6 +75,8 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 			common.Error(ctx, http.StatusNotFound, "配置不存在")
 		case errors.Is(err, service.ErrVectorClockConflict):
 			common.Error(ctx, http.StatusConflict, "版本冲突，请先 pull 最新配置")
+		case errors.Is(err, service.ErrConfigInvalidState), errors.Is(err, service.ErrConfigPurged):
+			common.Error(ctx, http.StatusConflict, "资产已删除，请通过恢复接口重新激活")
 		default:
 			common.Error(ctx, http.StatusInternalServerError, "上传失败")
 		}
@@ -81,7 +84,7 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 	}
 
 	status := http.StatusOK
-	if req.ID == nil || *req.ID == 0 {
+	if (req.ID == nil || *req.ID == 0) && req.AssetID == "" {
 		status = http.StatusCreated
 	}
 
@@ -179,8 +182,14 @@ func toConfigResponse(cfg *model.ServerConfig) gin.H {
 	return gin.H{
 		"id":                    cfg.ID,
 		"user_id":               cfg.UserID,
+		"asset_id":              cfg.AssetID,
 		"encrypted_blob_base64": base64.StdEncoding.EncodeToString(cfg.EncryptedBlob),
 		"vector_clock":          cfg.VectorClock,
+		"state":                 cfg.State,
+		"deleted_at":            cfg.DeletedAt,
+		"purge_after":           cfg.PurgeAfter,
+		"deleted_by_device_id":  cfg.DeletedByDeviceID,
+		"last_operation_id":     cfg.LastOperationID,
 		"updated_at":            cfg.UpdatedAt,
 	}
 }

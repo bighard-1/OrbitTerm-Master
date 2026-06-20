@@ -41,6 +41,10 @@ func Register(
 		{
 			configGroup.POST("/upload", configController.Upload)
 			configGroup.GET("/pull", configController.Pull)
+			configGroup.GET("/trash", configController.Trash)
+			configGroup.POST("/assets/:asset_id/delete", configController.DeleteAsset)
+			configGroup.POST("/assets/:asset_id/restore", configController.RestoreAsset)
+			configGroup.POST("/assets/:asset_id/purge", configController.PurgeAsset)
 			configGroup.DELETE("/:id", configController.Delete)
 		}
 
