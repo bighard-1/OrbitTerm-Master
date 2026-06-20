@@ -6,14 +6,17 @@ import (
 )
 
 const (
-	SystemSettingKeySecurityPolicy = "security_policy"
-	SystemSettingKeyRecoveryPolicy = "recovery_policy"
-	SystemSettingKeyAuditPolicy    = "audit_policy"
+	SystemSettingKeySecurityPolicy      = "security_policy"
+	SystemSettingKeyRecoveryPolicy      = "recovery_policy"
+	SystemSettingKeyAuditPolicy         = "audit_policy"
+	SystemSettingKeyAssetDeletionPolicy = "asset_deletion_policy"
 
-	AuditActionSystemSecurityPolicyUpdate = "system_security_policy_update"
-	AuditActionSystemRecoveryPolicyUpdate = "system_recovery_policy_update"
-	AuditActionSystemAuditPolicyUpdate    = "system_audit_policy_update"
-	AuditActionSystemAuditCleanup         = "system_audit_cleanup"
+	AuditActionSystemSecurityPolicyUpdate      = "system_security_policy_update"
+	AuditActionSystemRecoveryPolicyUpdate      = "system_recovery_policy_update"
+	AuditActionSystemAuditPolicyUpdate         = "system_audit_policy_update"
+	AuditActionSystemAuditCleanup              = "system_audit_cleanup"
+	AuditActionSystemAssetDeletionPolicyUpdate = "system_asset_deletion_policy_update"
+	AuditActionSystemAssetTrashCleanup         = "system_asset_trash_cleanup"
 )
 
 // SystemSetting 存储服务端运行策略等小型配置。
@@ -137,6 +140,48 @@ func (p *AuditPolicy) Normalize() {
 	if p.RetentionDays > 3650 {
 		p.RetentionDays = 3650
 	}
+	if p.CleanupBatchLimit < 100 {
+		p.CleanupBatchLimit = 100
+	}
+	if p.CleanupBatchLimit > 5000 {
+		p.CleanupBatchLimit = 5000
+	}
+}
+
+// AssetDeletionPolicy 控制“最近删除”与最小墓碑的生命周期。
+// TombstoneRetentionDays=0 表示永久保留最小墓碑，这是最稳妥的防复活策略。
+type AssetDeletionPolicy struct {
+	RecentDeletedRetentionDays int  `json:"recent_deleted_retention_days"`
+	TombstoneRetentionDays     int  `json:"tombstone_retention_days"`
+	CleanupBatchLimit          int  `json:"cleanup_batch_limit"`
+	AutoCleanupEnabled         bool `json:"auto_cleanup_enabled"`
+}
+
+func DefaultAssetDeletionPolicy() AssetDeletionPolicy {
+	return AssetDeletionPolicy{
+		RecentDeletedRetentionDays: 90,
+		TombstoneRetentionDays:     0,
+		CleanupBatchLimit:          500,
+		AutoCleanupEnabled:         true,
+	}
+}
+
+func (p *AssetDeletionPolicy) Normalize() {
+	if p.RecentDeletedRetentionDays < 7 {
+		p.RecentDeletedRetentionDays = 7
+	}
+	if p.RecentDeletedRetentionDays > 3650 {
+		p.RecentDeletedRetentionDays = 3650
+	}
+
+	// 非永久墓碑至少保留一年，降低长期离线设备重新上传旧资产的风险。
+	if p.TombstoneRetentionDays != 0 && p.TombstoneRetentionDays < 365 {
+		p.TombstoneRetentionDays = 365
+	}
+	if p.TombstoneRetentionDays > 3650 {
+		p.TombstoneRetentionDays = 3650
+	}
+
 	if p.CleanupBatchLimit < 100 {
 		p.CleanupBatchLimit = 100
 	}

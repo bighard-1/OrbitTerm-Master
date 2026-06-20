@@ -7,7 +7,6 @@ import (
 
 	"orbitterm-server/internal/config"
 	"orbitterm-server/internal/controller"
-	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/router"
 	"orbitterm-server/internal/service"
@@ -35,8 +34,8 @@ func main() {
 		log.Fatalf("数据库连接失败: %v", err)
 	}
 
-	// 自动迁移核心模型。生产环境建议配合版本化迁移工具（如 golang-migrate）。
-	if err := db.AutoMigrate(&model.User{}, &model.ServerConfig{}, &model.AdminAuditLog{}, &model.SystemSetting{}); err != nil {
+	// 执行集中式兼容迁移；历史密文配置会保持 active，不需要服务端解密。
+	if err := config.MigrateDatabase(db); err != nil {
 		log.Fatalf("数据库迁移失败: %v", err)
 	}
 
