@@ -129,3 +129,24 @@ func parseVectorClockJSON(raw string) (map[string]int64, error) {
 	}
 	return parsed, nil
 }
+
+func bumpVectorClock(raw, actor string, minimum int64) (string, error) {
+	clock, err := parseVectorClockJSON(raw)
+	if err != nil {
+		return "", err
+	}
+	actor = strings.TrimSpace(actor)
+	if actor == "" {
+		return "", errors.New("vector clock actor is required")
+	}
+	next := clock[actor] + 1
+	if minimum > next {
+		next = minimum
+	}
+	clock[actor] = next
+	encoded, err := json.Marshal(clock)
+	if err != nil {
+		return "", fmt.Errorf("marshal vector clock: %w", err)
+	}
+	return string(encoded), nil
+}

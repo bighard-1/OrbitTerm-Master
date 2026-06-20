@@ -82,6 +82,12 @@ func (f fakeServerConfigCounter) MaxRevisionByUserID(_ uint) (uint64, error) { r
 func (f fakeServerConfigCounter) AcknowledgeDevice(_ uint, _ string, _ uint64, _, _ string, _ time.Time) error {
 	return nil
 }
+func (f fakeServerConfigCounter) ListExpiredDeleted(_ time.Time, _ int) ([]model.ServerConfig, error) {
+	return nil, nil
+}
+func (f fakeServerConfigCounter) DeleteAcknowledgedPurgedBefore(_ time.Time, _ int) (int64, int64, error) {
+	return 0, 0, nil
+}
 func (f fakeServerConfigCounter) CountAll() (int64, error)                    { return f.count, nil }
 func (f fakeServerConfigCounter) DeleteByIDAndUserID(_, _ uint) (bool, error) { return false, nil }
 

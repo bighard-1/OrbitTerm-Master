@@ -117,6 +117,8 @@ OrbitTerm-Server
 
 后端还内置到期封禁自动解封任务，可通过 `ADMIN_AUTO_UNBAN_ENABLED`、`ADMIN_AUTO_UNBAN_INTERVAL_MINUTES` 与 `ADMIN_AUTO_UNBAN_BATCH_LIMIT` 控制。
 
+后端同时内置最近删除自动清理任务：`ASSET_TRASH_CLEANUP_INTERVAL_MINUTES` 控制扫描间隔，保留周期、批量上限与自动清理开关由管理端动态配置。默认可恢复密文保留 90 天，最小防复活墓碑永久保留。
+
 管理端高危操作要求：
 
 - 封禁、重置登录密码、强制下线、软删除、过期封禁扫描必须传入 `reason`。

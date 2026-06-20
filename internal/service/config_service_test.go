@@ -335,6 +335,31 @@ func (f *fakeConfigRepo) AcknowledgeDevice(_ uint, _ string, revision uint64, _,
 	}
 	return nil
 }
+func (f *fakeConfigRepo) ListExpiredDeleted(now time.Time, limit int) ([]model.ServerConfig, error) {
+	items := make([]model.ServerConfig, 0)
+	for _, item := range f.items {
+		if item.State == model.ServerConfigStateDeleted && item.PurgeAfter != nil && !item.PurgeAfter.After(now) {
+			items = append(items, *item)
+		}
+	}
+	if len(items) > limit {
+		items = items[:limit]
+	}
+	return items, nil
+}
+func (f *fakeConfigRepo) DeleteAcknowledgedPurgedBefore(cutoff time.Time, limit int) (int64, int64, error) {
+	var deleted int64
+	for assetID, item := range f.items {
+		if deleted >= int64(limit) {
+			break
+		}
+		if item.State == model.ServerConfigStatePurged && !item.UpdatedAt.After(cutoff) {
+			delete(f.items, assetID)
+			deleted++
+		}
+	}
+	return deleted, 0, nil
+}
 func (f *fakeConfigRepo) CountAll() (int64, error) { return int64(len(f.items)), nil }
 func (f *fakeConfigRepo) DeleteByIDAndUserID(id, userID uint) (bool, error) {
 	for assetID, item := range f.items {

@@ -477,6 +477,49 @@ curl -s "$ORBIT_API/api/v1/admin/audit-logs?target_user_id=用户ID&limit=50" \
   -H "Authorization: Bearer $ADMIN_TOKEN"
 ```
 
+## 9.1 资产删除策略与最近删除清理
+
+读取策略：
+
+```http
+GET /api/v1/admin/system/asset-deletion-policy
+Authorization: Bearer <admin_access_token>
+```
+
+更新策略：
+
+```http
+PUT /api/v1/admin/system/asset-deletion-policy
+Authorization: Bearer <admin_access_token>
+Content-Type: application/json
+
+{
+  "recent_deleted_retention_days": 90,
+  "tombstone_retention_days": 0,
+  "cleanup_batch_limit": 500,
+  "auto_cleanup_enabled": true,
+  "reason": "调整资产删除保留策略",
+  "confirmation": "CONFIRM"
+}
+```
+
+`tombstone_retention_days=0` 表示永久保留最小墓碑，是推荐且最安全的配置。非零值会被限制为至少 365 天。
+
+手动执行到期清理：
+
+```http
+POST /api/v1/admin/system/asset-trash/cleanup
+Authorization: Bearer <admin_access_token>
+Content-Type: application/json
+
+{
+  "reason": "维护窗口手动清理",
+  "confirmation": "CONFIRM"
+}
+```
+
+响应包含清除密文数量、回收墓碑数量，以及因设备同步水位不足而安全延期的数量。手动清理不受自动清理开关限制，但仍严格遵守保留周期和设备确认条件。
+
 ## 10. 角色权限速查
 
 | 角色 | 可查看 | 可操作 |

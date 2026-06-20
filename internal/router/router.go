@@ -91,6 +91,17 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.UpdateAuditPolicy,
 			)
+			adminGroup.GET("/system/asset-deletion-policy", adminController.GetAssetDeletionPolicy)
+			adminGroup.PUT(
+				"/system/asset-deletion-policy",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.UpdateAssetDeletionPolicy,
+			)
+			adminGroup.POST(
+				"/system/asset-trash/cleanup",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.CleanupExpiredAssetTrash,
+			)
 			adminGroup.GET(
 				"/system/backup-readiness",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),

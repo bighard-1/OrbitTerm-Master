@@ -24,6 +24,7 @@ type AdminController struct {
 	securityPolicy      service.SecurityPolicyService
 	recoveryPolicy      service.RecoveryPolicyService
 	auditPolicy         service.AuditPolicyService
+	assetDeletionPolicy service.AssetDeletionPolicyManager
 	backupReadiness     service.BackupReadinessService
 	dashboard           service.AdminDashboardService
 	adminBootstrapToken string
@@ -36,6 +37,7 @@ func NewAdminController(
 	securityPolicy service.SecurityPolicyService,
 	recoveryPolicy service.RecoveryPolicyService,
 	auditPolicy service.AuditPolicyService,
+	assetDeletionPolicy service.AssetDeletionPolicyManager,
 	backupReadiness service.BackupReadinessService,
 	dashboard service.AdminDashboardService,
 	adminBootstrapToken string,
@@ -47,10 +49,75 @@ func NewAdminController(
 		securityPolicy:      securityPolicy,
 		recoveryPolicy:      recoveryPolicy,
 		auditPolicy:         auditPolicy,
+		assetDeletionPolicy: assetDeletionPolicy,
 		backupReadiness:     backupReadiness,
 		dashboard:           dashboard,
 		adminBootstrapToken: adminBootstrapToken,
 	}
+}
+
+func (c *AdminController) GetAssetDeletionPolicy(ctx *gin.Context) {
+	policy, err := c.assetDeletionPolicy.GetAssetDeletionPolicy()
+	if err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "资产删除策略读取失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) UpdateAssetDeletionPolicy(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	var req struct {
+		service.AssetDeletionPolicyUpdate
+		Confirmation string `json:"confirmation"`
+	}
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+	policy, err := c.assetDeletionPolicy.UpdateAssetDeletionPolicy(adminID, req.AssetDeletionPolicyUpdate, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "资产删除策略更新失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, policy)
+}
+
+func (c *AdminController) CleanupExpiredAssetTrash(ctx *gin.Context) {
+	adminID, ok := extractContextUint(ctx, middleware.ContextUserIDKey)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	var req adminReasonRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if !validateHighRiskRequest(ctx, req.Reason, req.Confirmation) {
+		return
+	}
+	result, err := c.assetDeletionPolicy.CleanupExpiredAssets(adminID, req.Reason, requestMeta(ctx))
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidInput) {
+			common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
+			return
+		}
+		common.Error(ctx, http.StatusInternalServerError, "过期资产清理失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, result)
 }
 
 func (c *AdminController) BootstrapStatus(ctx *gin.Context) {

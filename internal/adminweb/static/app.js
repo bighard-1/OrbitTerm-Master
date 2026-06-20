@@ -182,10 +182,11 @@ async function loadUserDetail(userID) {
 }
 
 async function loadPolicies() {
-  const [security, recovery, auditPolicy] = await Promise.all([
+  const [security, recovery, auditPolicy, assetDeletionPolicy] = await Promise.all([
     api('/api/v1/admin/system/security-policy'),
     api('/api/v1/admin/system/recovery-policy'),
-    api('/api/v1/admin/system/audit-policy')
+    api('/api/v1/admin/system/audit-policy'),
+    api('/api/v1/admin/system/asset-deletion-policy')
   ]);
   $('registrationEnabled').checked = Boolean(security.registration_enabled);
   $('minPasswordLength').value = security.min_password_length || 8;
@@ -194,16 +195,34 @@ async function loadPolicies() {
   $('recoveryMessage').value = recovery.user_facing_message || '';
   $('auditRetentionDays').value = auditPolicy.retention_days || 180;
   $('auditCleanupBatchLimit').value = auditPolicy.cleanup_batch_limit || 500;
+  $('assetAutoCleanupEnabled').checked = Boolean(assetDeletionPolicy.auto_cleanup_enabled);
+  $('assetRecentDeletedDays').value = assetDeletionPolicy.recent_deleted_retention_days || 90;
+  $('assetTombstoneDays').value = assetDeletionPolicy.tombstone_retention_days ?? 0;
+  $('assetCleanupBatchLimit').value = assetDeletionPolicy.cleanup_batch_limit || 500;
 }
 
 async function savePolicies() {
+  const reason = promptReason('更新系统策略原因');
+  if (!reason) return;
+  if (!requireTypedConfirmation('更新资产删除与保留策略')) return;
+  await api('/api/v1/admin/system/asset-deletion-policy', {
+    method: 'PUT',
+    body: JSON.stringify({
+      recent_deleted_retention_days: Number($('assetRecentDeletedDays').value || 90),
+      tombstone_retention_days: Number($('assetTombstoneDays').value || 0),
+      cleanup_batch_limit: Number($('assetCleanupBatchLimit').value || 500),
+      auto_cleanup_enabled: $('assetAutoCleanupEnabled').checked,
+      reason,
+      confirmation: 'CONFIRM'
+    })
+  });
   await api('/api/v1/admin/system/security-policy', {
     method: 'PUT',
     body: JSON.stringify({
       registration_enabled: $('registrationEnabled').checked,
       registration_disabled_reason: $('registrationReason').value.trim(),
       min_password_length: Number($('minPasswordLength').value || 8),
-      reason: '管理端更新安全策略'
+      reason
     })
   });
   await api('/api/v1/admin/system/recovery-policy', {
@@ -211,7 +230,7 @@ async function savePolicies() {
     body: JSON.stringify({
       support_contact: $('supportContact').value.trim(),
       user_facing_message: $('recoveryMessage').value.trim(),
-      reason: '管理端更新恢复策略文案'
+      reason
     })
   });
   await api('/api/v1/admin/system/audit-policy', {
@@ -219,10 +238,22 @@ async function savePolicies() {
     body: JSON.stringify({
       retention_days: Number($('auditRetentionDays').value || 180),
       cleanup_batch_limit: Number($('auditCleanupBatchLimit').value || 500),
-      reason: '管理端更新审计日志保留策略'
+      reason
     })
   });
   toast('策略已保存');
+  await loadPolicies();
+}
+
+async function cleanupAssetTrash() {
+  const reason = promptReason('立即清理到期资产原因');
+  if (!reason) return;
+  if (!requireTypedConfirmation('清除到期资产密文及安全可回收墓碑')) return;
+  const result = await api('/api/v1/admin/system/asset-trash/cleanup', {
+    method: 'POST',
+    body: JSON.stringify({ reason, confirmation: 'CONFIRM' })
+  });
+  toast(`资产清理完成：密文 ${result.purged_count || 0}，墓碑 ${result.tombstones_deleted || 0}，安全延期 ${result.tombstones_deferred || 0}`);
 }
 
 async function loadBackup() {
@@ -617,6 +648,7 @@ $('loginButton').addEventListener('click', () => login().catch(err => toast(err.
 $('bootstrapButton').addEventListener('click', () => bootstrap().catch(err => toast(err.message)));
 $('logoutButton').addEventListener('click', () => { setAuth(''); hideUserDetail(); toast('已退出'); });
 $('savePolicies').addEventListener('click', () => savePolicies().catch(err => toast(err.message)));
+$('cleanupAssetTrash').addEventListener('click', () => cleanupAssetTrash().catch(err => toast(err.message)));
 $('refreshBackup').addEventListener('click', () => loadBackup().catch(err => toast(err.message)));
 $('exportDiagnostics').addEventListener('click', () => exportDiagnostics().catch(err => toast(err.message)));
 $('scanExpiredBans').addEventListener('click', () => highRisk('/api/v1/admin/users/expired-bans/scan', { limit: 100, reason: promptReason('扫描原因') }));

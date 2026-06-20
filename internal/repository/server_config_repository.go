@@ -25,6 +25,8 @@ type ServerConfigRepository interface {
 	ListChangedByUserID(userID uint, afterRevision uint64, limit int) ([]model.ServerConfig, bool, error)
 	MaxRevisionByUserID(userID uint) (uint64, error)
 	AcknowledgeDevice(userID uint, deviceID string, revision uint64, platform, clientVersion string, seenAt time.Time) error
+	ListExpiredDeleted(now time.Time, limit int) ([]model.ServerConfig, error)
+	DeleteAcknowledgedPurgedBefore(cutoff time.Time, limit int) (deleted int64, deferred int64, err error)
 	CountAll() (int64, error)
 	DeleteByIDAndUserID(id, userID uint) (bool, error)
 }
@@ -212,6 +214,64 @@ func (r *serverConfigRepository) AcknowledgeDevice(
 			"updated_at":        seenAt,
 		}),
 	}).Create(state).Error
+}
+
+// ListExpiredDeleted 返回恢复窗口已经结束、等待清除密文的资产。
+// 实际状态转换仍由 Service 通过 MutateByAssetID 完成，保证向量钟和修订日志一致。
+func (r *serverConfigRepository) ListExpiredDeleted(now time.Time, limit int) ([]model.ServerConfig, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+	var configs []model.ServerConfig
+	err := r.db.Where("state = ? AND purge_after IS NOT NULL AND purge_after <= ?", model.ServerConfigStateDeleted, now).
+		Order("purge_after ASC, id ASC").Limit(limit).Find(&configs).Error
+	return configs, err
+}
+
+// DeleteAcknowledgedPurgedBefore 只物理回收所有已登记设备均确认过的最小墓碑。
+// 没有设备确认记录，或任一设备仍落后于墓碑修订时，一律延期，优先保证防复活安全性。
+func (r *serverConfigRepository) DeleteAcknowledgedPurgedBefore(cutoff time.Time, limit int) (int64, int64, error) {
+	if limit <= 0 || limit > 5000 {
+		limit = 500
+	}
+
+	var candidates []uint
+	if err := r.db.Model(&model.ServerConfig{}).
+		Where("state = ? AND updated_at <= ?", model.ServerConfigStatePurged, cutoff).
+		Order("updated_at ASC, id ASC").Limit(limit).Pluck("id", &candidates).Error; err != nil {
+		return 0, 0, err
+	}
+	if len(candidates) == 0 {
+		return 0, 0, nil
+	}
+
+	var eligible []uint
+	err := r.db.Raw(`
+		SELECT sc.id
+		FROM server_configs sc
+		WHERE sc.id IN ?
+		  AND EXISTS (
+		      SELECT 1 FROM sync_device_states s
+		      WHERE s.user_id = sc.user_id
+		  )
+		  AND NOT EXISTS (
+		      SELECT 1 FROM sync_device_states s
+		      WHERE s.user_id = sc.user_id
+		        AND s.last_ack_revision < sc.server_revision
+		  )
+		ORDER BY sc.updated_at ASC, sc.id ASC
+	`, candidates).Scan(&eligible).Error
+	if err != nil {
+		return 0, 0, err
+	}
+	deferred := int64(len(candidates) - len(eligible))
+	if len(eligible) == 0 {
+		return 0, deferred, nil
+	}
+
+	result := r.db.Unscoped().Where("id IN ? AND state = ?", eligible, model.ServerConfigStatePurged).
+		Delete(&model.ServerConfig{})
+	return result.RowsAffected, deferred, result.Error
 }
 
 func (r *serverConfigRepository) CountAll() (int64, error) {

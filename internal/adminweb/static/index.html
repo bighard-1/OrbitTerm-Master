@@ -162,8 +162,18 @@
           <label>支持联系方式<input id="supportContact" type="text" /></label>
           <label>审计保留天数<input id="auditRetentionDays" type="number" min="30" max="3650" /></label>
           <label>审计清理批量<input id="auditCleanupBatchLimit" type="number" min="100" max="5000" /></label>
+          <label class="check"><input id="assetAutoCleanupEnabled" type="checkbox" /> 自动清理到期资产密文</label>
+          <label>最近删除保留天数<input id="assetRecentDeletedDays" type="number" min="7" max="3650" /></label>
+          <label>最小墓碑保留天数<input id="assetTombstoneDays" type="number" min="0" max="3650" /></label>
+          <label>资产清理批量<input id="assetCleanupBatchLimit" type="number" min="100" max="5000" /></label>
+          <p class="policy-note wide-field">
+            最小墓碑设为 0 表示永久保留（推荐）。非 0 值最低为 365 天，并且只有所有已登记设备均确认删除修订后才会物理回收。
+          </p>
           <label class="wide-field">恢复提示<textarea id="recoveryMessage" rows="4"></textarea></label>
-          <button id="savePolicies" class="primary">保存策略</button>
+          <div class="actions wide-field policy-actions">
+            <button id="cleanupAssetTrash" class="danger">立即清理到期资产</button>
+            <button id="savePolicies" class="primary">保存策略</button>
+          </div>
         </div>
       </section>
 

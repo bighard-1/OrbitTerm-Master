@@ -91,6 +91,12 @@ p { color: var(--muted); }
 .wide-field { grid-column: 1 / -1; }
 label { color: var(--muted); display: grid; gap: 6px; font-size: 13px; }
 label.check { display: flex; align-items: center; gap: 8px; color: var(--text); }
+.policy-note {
+  margin: 0; padding: 11px 12px; border-radius: 12px;
+  border: 1px solid rgba(255,209,102,0.24);
+  background: rgba(255,209,102,0.06); color: var(--muted); font-size: 12px; line-height: 1.55;
+}
+.policy-actions { justify-content: flex-end; }
 input, select, textarea {
   width: 100%; border: 1px solid var(--border); border-radius: 12px;
   background: rgba(8, 11, 18, 0.82); color: var(--text);

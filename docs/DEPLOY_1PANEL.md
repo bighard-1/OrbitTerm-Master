@@ -82,6 +82,7 @@ services:
       ADMIN_AUTO_UNBAN_ENABLED: "true"
       ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
       ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"
+      ASSET_TRASH_CLEANUP_INTERVAL_MINUTES: "60"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -143,6 +144,11 @@ volumes:
 10. `ADMIN_AUTO_UNBAN_BATCH_LIMIT`
    - 示例：`100`
    - 说明：每次自动扫描最多处理的到期封禁用户数，建议不超过 500。
+
+11. `ASSET_TRASH_CLEANUP_INTERVAL_MINUTES`
+   - 示例：`60`
+   - 说明：后台检查最近删除到期记录的间隔，最低有效值为 5 分钟；更低的值会回退为 60 分钟。
+   - 注意：实际自动清理开关及保留周期由管理端“系统策略”动态控制，修改后无需重启容器。
 
 数据库容器变量（`orbit-db`）：
 

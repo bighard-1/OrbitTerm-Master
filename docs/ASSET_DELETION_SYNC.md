@@ -105,3 +105,27 @@ GET /api/v1/config/identity-match?fingerprint=64位HMAC十六进制摘要
 ```
 
 如果匹配到 `deleted`，客户端应优先提示“恢复并更新”或“仍作为新资产添加”。服务端不对指纹建立唯一约束，因此用户明确选择新资产时仍可使用新的 AssetID 创建独立记录。即使可恢复密文已清除，最小墓碑仍可保留该不可逆指纹，用于避免无提示重复添加。
+
+## 管理策略与自动清理
+
+管理端可动态调整以下策略，修改后无需重启后端：
+
+- `recent_deleted_retention_days`：可恢复密文的保留天数，范围 7～3650，默认 90。
+- `tombstone_retention_days`：最小墓碑保留天数。`0` 表示永久保留（推荐）；非 0 值最少 365 天。
+- `cleanup_batch_limit`：每轮最多处理 100～5000 条记录。
+- `auto_cleanup_enabled`：是否允许后台 Worker 自动处理到期记录。
+
+自动清理分为两个安全阶段：
+
+1. 到达 `purge_after` 后，将 `deleted` 转换为 `purged`，清除加密 Blob，并生成新的向量钟与服务端修订。
+2. 只有墓碑配置了非永久保留期、已经超过期限，并且该用户所有已登记设备均确认过墓碑修订时，才物理回收最小墓碑。
+
+没有设备确认记录或任一设备同步水位落后时，墓碑会被安全延期。
+
+管理接口：
+
+- `GET /api/v1/admin/system/asset-deletion-policy`
+- `PUT /api/v1/admin/system/asset-deletion-policy`
+- `POST /api/v1/admin/system/asset-trash/cleanup`
+
+更新策略和手动清理均要求操作原因及 `confirmation=CONFIRM`，并写入管理审计日志。

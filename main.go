@@ -56,12 +56,13 @@ func main() {
 	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
 	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService)
 	auditPolicyService := service.NewAuditPolicyService(systemSettingRepo, adminAuditRepo, adminAuditService)
-	assetDeletionPolicyService := service.NewAssetDeletionPolicyService(systemSettingRepo)
 	backupReadinessService := service.NewBackupReadinessService(db, cfg, adminAuditService)
 	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService)
 	authController := controller.NewAuthController(authService, recoveryPolicyService)
 
 	configRepo := repository.NewServerConfigRepository(db)
+	assetDeletionPolicyService := service.NewAssetDeletionPolicyService(systemSettingRepo)
+	assetDeletionPolicyManager := service.NewAssetDeletionPolicyManager(systemSettingRepo, configRepo, adminAuditService)
 	configService := service.NewConfigService(configRepo, assetDeletionPolicyService)
 	configController := controller.NewConfigController(configService)
 	adminDashboardService := service.NewAdminDashboardService(userRepo, configRepo, adminAuditService, backupReadinessService)
@@ -77,6 +78,7 @@ func main() {
 		securityPolicyService,
 		recoveryPolicyService,
 		auditPolicyService,
+		assetDeletionPolicyManager,
 		backupReadinessService,
 		adminDashboardService,
 		cfg.AdminBootstrapToken,
@@ -86,6 +88,7 @@ func main() {
 	engine := gin.Default()
 	router.Register(engine, authController, configController, adminController, healthController, jwtManager, userRepo)
 	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
+	worker.StartAssetTrashCleanupWorker(context.Background(), cfg, assetDeletionPolicyManager)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)
 	if err := engine.Run(":" + cfg.ServerPort); err != nil {
