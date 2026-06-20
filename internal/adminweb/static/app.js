@@ -3,6 +3,9 @@ const state = {
   currentView: 'dashboard',
   selectedUserID: null,
   selectedUserIDs: new Set(),
+  userOffset: 0,
+  userLimit: 50,
+  userTotal: 0,
   auditOffset: 0,
   auditLimit: 50,
   auditTotal: 0
@@ -43,6 +46,8 @@ function setAuth(token) {
 function clearSensitiveViews() {
 	state.selectedUserID = null;
 	state.selectedUserIDs.clear();
+	state.userOffset = 0;
+	state.userTotal = 0;
 	$('recentAudits').textContent = '登录后显示最近审计。';
 	$('usersList').textContent = '登录后显示用户列表。';
 	$('auditList').textContent = '登录后显示审计日志。';
@@ -56,6 +61,7 @@ function clearSensitiveViews() {
 	['recentAudits', 'usersList', 'auditList', 'backupReport'].forEach(id => $(id).classList.add('empty'));
 	$('userDetail').classList.add('hidden');
 	$('userDetail').innerHTML = '';
+	renderUserPager();
 }
 
 function showView(view) {
@@ -128,17 +134,45 @@ function renderRuntimeStatus(runtime) {
 }
 
 async function loadUsers() {
-  const params = new URLSearchParams({ limit: '50', offset: '0' });
+  state.userLimit = Number($('userPageSize').value) || 50;
+  const params = new URLSearchParams({ limit: String(state.userLimit), offset: String(state.userOffset) });
   if ($('userSearch').value.trim()) params.set('q', $('userSearch').value.trim());
   if ($('userStatus').value) params.set('status', $('userStatus').value);
+  if ($('userRole').value) params.set('role', $('userRole').value);
   const data = await api(`/api/v1/admin/users?${params}`);
+  state.userTotal = Number(data.total) || 0;
+  if (state.userTotal > 0 && state.userOffset >= state.userTotal) {
+    state.userOffset = Math.floor((state.userTotal - 1) / state.userLimit) * state.userLimit;
+    return loadUsers();
+  }
   renderList($('usersList'), data.items || [], userRow);
   syncSelectedUsers(data.items || []);
+  renderUserPager();
   if (state.selectedUserID) {
     const stillVisible = (data.items || []).some(user => Number(user.id) === Number(state.selectedUserID));
     if (stillVisible) loadUserDetail(state.selectedUserID).catch(err => toast(err.message));
     else hideUserDetail();
   }
+}
+
+function renderUserPager() {
+  const totalPages = Math.max(1, Math.ceil(state.userTotal / state.userLimit));
+  const currentPage = Math.min(totalPages, Math.floor(state.userOffset / state.userLimit) + 1);
+  $('userPageInfo').textContent = `第 ${currentPage} / ${totalPages} 页 · 共 ${state.userTotal} 个用户`;
+  $('userPrev').disabled = state.userOffset <= 0;
+  $('userNext').disabled = state.userOffset + state.userLimit >= state.userTotal;
+}
+
+function moveUserPage(direction) {
+  const nextOffset = state.userOffset + direction * state.userLimit;
+  if (nextOffset < 0 || nextOffset >= state.userTotal) return;
+  state.userOffset = nextOffset;
+  loadUsers().catch(err => toast(err.message));
+}
+
+function resetUserFilters() {
+  state.userOffset = 0;
+  refresh(state.currentView).catch(err => toast(err.message));
 }
 
 async function loadUserDetail(userID) {
@@ -596,9 +630,11 @@ $('cleanupAudit').addEventListener('click', () => cleanupAuditLogs().catch(err =
 $('createManagedUser').addEventListener('click', () => createManagedUser().catch(err => toast(err.message)));
 $('auditPrev').addEventListener('click', () => moveAuditPage(-1));
 $('auditNext').addEventListener('click', () => moveAuditPage(1));
+$('userPrev').addEventListener('click', () => moveUserPage(-1));
+$('userNext').addEventListener('click', () => moveUserPage(1));
 document.querySelectorAll('.nav-item').forEach(btn => btn.addEventListener('click', () => showView(btn.dataset.view)));
 document.querySelectorAll('[data-refresh]').forEach(btn => btn.addEventListener('click', () => refresh(btn.dataset.refresh).catch(err => toast(err.message))));
-['userSearch', 'userStatus'].forEach(id => $(id).addEventListener('change', () => refresh(state.currentView).catch(err => toast(err.message))));
+['userSearch', 'userStatus', 'userRole', 'userPageSize'].forEach(id => $(id).addEventListener('change', resetUserFilters));
 ['auditAction', 'auditTarget'].forEach(id => $(id).addEventListener('change', () => { state.auditOffset = 0; refresh(state.currentView).catch(err => toast(err.message)); }));
 ['loginUsername', 'loginPassword'].forEach(id => $(id).addEventListener('keydown', event => {
   if (event.key === 'Enter') login().catch(err => toast(err.message));
