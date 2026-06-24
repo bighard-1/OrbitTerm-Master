@@ -27,7 +27,7 @@ func TestAdminConsoleIncludesGovernanceEntrypoints(t *testing.T) {
 		t.Fatalf("read index asset: %v", err)
 	}
 	indexText := string(index)
-	for _, marker := range []string{"backupView", "userDetail", "banDuration", "batchBar", "exportAudit", "managedRole", "auditPageInfo", "exportDiagnostics", "metricRuntime", "metricAutoUnban", "metricTokenPolicy", "auditRetentionDays", "cleanupAudit", "forceLogoutRegularUsers", "userRole", "userPageSize", "userPageInfo", "assetAutoCleanupEnabled", "assetRecentDeletedDays", "assetTombstoneDays", "assetCleanupBatchLimit", "cleanupAssetTrash"} {
+	for _, marker := range []string{"authScreen", "appShell", "backupView", "invitesView", "createInvite", "allowedEmailDomains", "cancelPolicies", "confirmDialog", "userDetail", "banDuration", "batchBar", "exportAudit", "managedRole", "auditPageInfo", "exportDiagnostics", "metricRuntime", "metricAutoUnban", "metricTokenPolicy", "auditRetentionDays", "cleanupAudit", "forceLogoutRegularUsers", "userRole", "userPageSize", "userPageInfo", "assetAutoCleanupEnabled", "assetRecentDeletedDays", "assetTombstoneDays", "assetCleanupBatchLimit", "cleanupAssetTrash"} {
 		if !strings.Contains(indexText, marker) {
 			t.Fatalf("index missing governance marker %q", marker)
 		}
@@ -38,7 +38,7 @@ func TestAdminConsoleIncludesGovernanceEntrypoints(t *testing.T) {
 		t.Fatalf("read app asset: %v", err)
 	}
 	appText := string(app)
-	for _, marker := range []string{"sessionStorage", "reset-password", "soft-delete", "backup-readiness", "system/diagnostics", "system/runtime", "system/audit-policy", "audit-logs/cleanup", "force-logout-regular", "batchUserAction", "exportAudit", "createManagedUser", "/role", "moveUserPage", "renderUserPager", "system/asset-deletion-policy", "system/asset-trash/cleanup", "cleanupAssetTrash"} {
+	for _, marker := range []string{"sessionStorage", "data.AccessToken", "registration-invites", "confirmAction", "reset-password", "soft-delete", "backup-readiness", "system/diagnostics", "system/runtime", "system/audit-policy", "audit-logs/cleanup", "force-logout-regular", "batchUserAction", "exportAudit", "createManagedUser", "/role", "moveUserPage", "renderUserPager", "system/asset-deletion-policy", "system/asset-trash/cleanup", "cleanupAssetTrash"} {
 		if !strings.Contains(appText, marker) {
 			t.Fatalf("app missing governance marker %q", marker)
 		}

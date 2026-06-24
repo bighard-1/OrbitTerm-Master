@@ -17,11 +17,13 @@ var (
 	ErrAccountBanned      = errors.New("账号已被封禁")
 	ErrAccountDeleted     = errors.New("账号已注销")
 	ErrRegistrationClosed = errors.New("注册已关闭")
+	ErrEmailDomainDenied  = errors.New("邮箱域名不允许注册")
+	ErrWeakPassword       = errors.New("密码复杂度不足")
 )
 
 // AuthService 提供身份认证相关业务逻辑。
 type AuthService interface {
-	Register(username, password string) (*model.User, error)
+	Register(username, password, inviteCode string) (*model.User, error)
 	Login(username, password string) (*utils.TokenPair, error)
 	Refresh(refreshToken string) (*utils.TokenPair, error)
 }
@@ -30,18 +32,19 @@ type authService struct {
 	userRepo       repository.UserRepository
 	jwtManager     *utils.JWTManager
 	policyProvider SecurityPolicyProvider
+	inviteService  RegistrationInviteConsumer
 }
 
-func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTManager, policyProviders ...SecurityPolicyProvider) AuthService {
-	var policyProvider SecurityPolicyProvider
-	if len(policyProviders) > 0 {
-		policyProvider = policyProviders[0]
+func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTManager, policyProvider SecurityPolicyProvider, inviteServices ...RegistrationInviteConsumer) AuthService {
+	var inviteService RegistrationInviteConsumer
+	if len(inviteServices) > 0 {
+		inviteService = inviteServices[0]
 	}
-
 	return &authService{
 		userRepo:       userRepo,
 		jwtManager:     jwtManager,
 		policyProvider: policyProvider,
+		inviteService:  inviteService,
 	}
 }
 
@@ -50,7 +53,7 @@ func NewAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTMan
 // 2) 用户名唯一性检查；
 // 3) Argon2id 密码哈希；
 // 4) 创建用户记录。
-func (s *authService) Register(username, password string) (*model.User, error) {
+func (s *authService) Register(username, password, inviteCode string) (*model.User, error) {
 	policy, err := s.securityPolicy()
 	if err != nil {
 		return nil, err
@@ -59,9 +62,12 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 		return nil, ErrRegistrationClosed
 	}
 
-	username = strings.TrimSpace(username)
-	if len(username) < 3 || len(password) < policy.MinPasswordLength {
-		return nil, ErrInvalidInput
+	username = strings.ToLower(strings.TrimSpace(username))
+	if !ValidateRegistrationEmail(username, policy.AllowedEmailDomains) {
+		return nil, ErrEmailDomainDenied
+	}
+	if !ValidateStrongPassword(password, policy.MinPasswordLength) {
+		return nil, ErrWeakPassword
 	}
 
 	existed, err := s.userRepo.FindByUsername(username)
@@ -76,6 +82,14 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 	if err != nil {
 		return nil, err
 	}
+	if policy.InvitationRequired {
+		if s.inviteService == nil {
+			return nil, ErrInviteRequired
+		}
+		if err := s.inviteService.Consume(inviteCode); err != nil {
+			return nil, err
+		}
+	}
 
 	user := &model.User{
 		Username:     username,
@@ -84,6 +98,9 @@ func (s *authService) Register(username, password string) (*model.User, error) {
 		Status:       policy.DefaultUserStatus,
 	}
 	if err := s.userRepo.Create(user); err != nil {
+		if policy.InvitationRequired && s.inviteService != nil {
+			_ = s.inviteService.Release(inviteCode)
+		}
 		return nil, err
 	}
 	return user, nil

@@ -34,6 +34,7 @@ func Register(
 			auth.POST("/login", middleware.IPRateLimit(30, time.Minute), authController.Login)
 			auth.POST("/refresh", middleware.IPRateLimit(120, time.Minute), authController.Refresh)
 			auth.GET("/recovery-info", middleware.IPRateLimit(60, time.Minute), authController.RecoveryInfo)
+			auth.GET("/registration-policy", middleware.IPRateLimit(60, time.Minute), authController.RegistrationPolicy)
 		}
 
 		configGroup := v1.Group("/config")
@@ -112,7 +113,32 @@ func Register(
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
 				adminController.Diagnostics,
 			)
+			adminGroup.POST(
+				"/system/migration-bundle/export",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				adminController.ExportMigrationBundle,
+			)
+			adminGroup.POST(
+				"/system/migration-bundle/restore",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				adminController.RestoreMigrationBundle,
+			)
 			adminGroup.GET("/users", adminController.ListUsers)
+			adminGroup.GET(
+				"/registration-invites",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.ListRegistrationInvites,
+			)
+			adminGroup.POST(
+				"/registration-invites",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.CreateRegistrationInvite,
+			)
+			adminGroup.POST(
+				"/registration-invites/:id/revoke",
+				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				adminController.RevokeRegistrationInvite,
+			)
 			adminGroup.POST(
 				"/audit-logs/cleanup",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),

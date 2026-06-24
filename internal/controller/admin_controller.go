@@ -14,6 +14,8 @@ type AdminController struct {
 	assetDeletionPolicy service.AssetDeletionPolicyManager
 	backupReadiness     service.BackupReadinessService
 	dashboard           service.AdminDashboardService
+	registrationInvites service.RegistrationInviteService
+	migrationBundles    service.MigrationBundleService
 	adminBootstrapToken string
 }
 
@@ -27,6 +29,8 @@ func NewAdminController(
 	assetDeletionPolicy service.AssetDeletionPolicyManager,
 	backupReadiness service.BackupReadinessService,
 	dashboard service.AdminDashboardService,
+	registrationInvites service.RegistrationInviteService,
+	migrationBundles service.MigrationBundleService,
 	adminBootstrapToken string,
 ) *AdminController {
 	return &AdminController{
@@ -39,6 +43,8 @@ func NewAdminController(
 		assetDeletionPolicy: assetDeletionPolicy,
 		backupReadiness:     backupReadiness,
 		dashboard:           dashboard,
+		registrationInvites: registrationInvites,
+		migrationBundles:    migrationBundles,
 		adminBootstrapToken: adminBootstrapToken,
 	}
 }

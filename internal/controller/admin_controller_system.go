@@ -129,7 +129,14 @@ func (c *AdminController) Login(ctx *gin.Context) {
 		writeAdminAuthError(ctx, err, "管理员登录失败")
 		return
 	}
-	common.Success(ctx, http.StatusOK, pair)
+	common.Success(ctx, http.StatusOK, gin.H{
+		"access_token":               pair.AccessToken,
+		"refresh_token":              pair.RefreshToken,
+		"token":                      pair.AccessToken,
+		"type":                       "Bearer",
+		"expires_in_seconds":         pair.AccessExpiresInSeconds,
+		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+	})
 }
 
 func (c *AdminController) Me(ctx *gin.Context) {

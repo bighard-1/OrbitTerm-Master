@@ -168,6 +168,8 @@ volumes:
 
 注意：`POSTGRES_PASSWORD` 必须与 `DATABASE_URL` 中 password 保持一致。
 
+时区建议：数据库 DSN 保持 `TimeZone=UTC`，数据库/API 容器设置 `TZ=UTC`。管理端会按浏览器本地时区显示，不要为了本地显示修改数据库时区。
+
 ## 5. 账号恢复与主密码边界
 
 OrbitTerm 后端采用零知识同步模型：
@@ -188,6 +190,7 @@ OrbitTerm 后端采用零知识同步模型：
    - 脱敏环境变量快照：记录 `JWT_SECRET`、`DATABASE_URL`、`JWT_ISSUER` 等变量是否配置，但不要把密钥原文写入普通文档。
    - 后端镜像版本号/tag/digest。
    - 1Panel 反向代理、域名、HTTPS 证书配置。
+   - 管理端导出的 `.otbackup` 加密全量迁移包，口令单独保管。
 5. 管理端可调用 `GET /api/v1/admin/system/backup-readiness` 查看备份就绪状态和环境变量脱敏检查结果，也可调用 `GET /api/v1/admin/system/diagnostics` 导出脱敏诊断包。
 
 ## 7. 升级与回滚
@@ -212,9 +215,10 @@ OrbitTerm 后端采用零知识同步模型：
 1. `orbit-db` healthy。
 2. `orbit-api` 无数据库连接错误。
 3. `GET /healthz` 返回 `status=ok`。
-4. `POST /api/v1/auth/register` 正常。
+4. 管理端生成邀请码后，使用允许的邮箱和 12 位以上复杂密码调用 `POST /api/v1/auth/register` 正常。
 5. `POST /api/v1/auth/login` 可返回 JWT。
 6. 带 Bearer Token 调用 `/api/v1/config/upload` 正常。
 7. 管理端调用 `/api/v1/admin/system/backup-readiness` 可返回脱敏环境检查结果；排障时可调用 `/api/v1/admin/system/diagnostics` 导出脱敏诊断包。
 8. 管理端调用 `/api/v1/admin/system/runtime` 可确认自动解封任务和数据库连接状态。
 9. 管理端高危操作必须填写原因，并传入 `confirmation=CONFIRM`，否则后端会拒绝执行。
+10. 在测试环境完成一次 `.otbackup` 导出与覆盖恢复演练，并确认恢复后重新注入运行环境变量、重启和重新登录。

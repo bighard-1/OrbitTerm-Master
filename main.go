@@ -54,11 +54,14 @@ func main() {
 	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
 	systemSettingRepo := repository.NewSystemSettingRepository(db)
 	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
+	registrationInviteRepo := repository.NewRegistrationInviteRepository(db)
+	registrationInviteService := service.NewRegistrationInviteService(registrationInviteRepo, adminAuditService)
 	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService)
 	auditPolicyService := service.NewAuditPolicyService(systemSettingRepo, adminAuditRepo, adminAuditService)
 	backupReadinessService := service.NewBackupReadinessService(db, cfg, adminAuditService)
-	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService)
-	authController := controller.NewAuthController(authService, recoveryPolicyService)
+	migrationBundleService := service.NewMigrationBundleService(db, cfg, adminAuditService)
+	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService, registrationInviteService)
+	authController := controller.NewAuthController(authService, recoveryPolicyService, securityPolicyService)
 
 	configRepo := repository.NewServerConfigRepository(db)
 	assetDeletionPolicyService := service.NewAssetDeletionPolicyService(systemSettingRepo)
@@ -81,6 +84,8 @@ func main() {
 		assetDeletionPolicyManager,
 		backupReadinessService,
 		adminDashboardService,
+		registrationInviteService,
+		migrationBundleService,
 		cfg.AdminBootstrapToken,
 	)
 

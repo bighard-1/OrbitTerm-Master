@@ -7,7 +7,36 @@
   <link rel="stylesheet" href="/admin-console/assets/styles.css" />
 </head>
 <body>
-  <div class="shell">
+  <div id="authScreen" class="auth-screen">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="logo">O</div>
+        <div><h1>OrbitTerm</h1><p>管理员控制台</p></div>
+      </div>
+      <section id="bootstrapPanel" class="auth-panel hidden">
+        <h2>首次初始化</h2>
+        <p>当前没有管理员。创建首个 super_admin 后，请清空 ADMIN_BOOTSTRAP_TOKEN 并重启后端。</p>
+        <div class="form-grid">
+          <label>初始化令牌<input id="bootstrapToken" type="password" placeholder="ADMIN_BOOTSTRAP_TOKEN" /></label>
+          <label>管理员邮箱<input id="bootstrapUsername" type="email" placeholder="admin@example.com" /></label>
+          <label>管理员密码<input id="bootstrapPassword" type="password" placeholder="至少 12 位，含大小写、数字和特殊字符" /></label>
+          <div class="actions"><button id="bootstrapButton" class="primary">创建 super_admin</button></div>
+        </div>
+      </section>
+      <section id="loginPanel" class="auth-panel">
+        <h2>管理员登录</h2>
+        <p>普通用户账号无法进入管理控制台。</p>
+        <div class="form-grid">
+          <label>管理员账号<input id="loginUsername" type="text" autocomplete="username" /></label>
+          <label>密码<input id="loginPassword" type="password" autocomplete="current-password" /></label>
+          <div class="actions"><button id="loginButton" class="primary">安全登录</button></div>
+        </div>
+      </section>
+      <small class="auth-foot">会话令牌仅保存在当前浏览器标签页中</small>
+    </div>
+  </div>
+
+  <div id="appShell" class="shell hidden">
     <aside class="sidebar">
       <div class="brand">
         <div class="logo">O</div>
@@ -19,6 +48,7 @@
       <nav class="nav" aria-label="管理端导航">
         <button class="nav-item active" data-view="dashboard">仪表盘</button>
         <button class="nav-item" data-view="users">用户治理</button>
+        <button class="nav-item" data-view="invites">邀请码</button>
         <button class="nav-item" data-view="policies">系统策略</button>
         <button class="nav-item" data-view="backup">备份自检</button>
         <button class="nav-item" data-view="audit">审计日志</button>
@@ -38,35 +68,6 @@
         <div class="status-pill" id="statusPill">未登录</div>
       </header>
 
-      <section id="bootstrapPanel" class="panel hidden">
-        <div class="panel-head">
-          <div>
-            <h2>首次初始化</h2>
-            <p>当前没有管理员，请创建第一个 super_admin。初始化完成后建议清空 ADMIN_BOOTSTRAP_TOKEN 并重启后端。</p>
-          </div>
-        </div>
-        <div class="form-grid">
-          <label>初始化令牌<input id="bootstrapToken" type="password" placeholder="ADMIN_BOOTSTRAP_TOKEN" /></label>
-          <label>管理员账号<input id="bootstrapUsername" type="text" placeholder="admin@example.com" /></label>
-          <label>管理员密码<input id="bootstrapPassword" type="password" placeholder="至少 12 位" /></label>
-          <button id="bootstrapButton" class="primary">创建 super_admin</button>
-        </div>
-      </section>
-
-      <section id="loginPanel" class="panel">
-        <div class="panel-head">
-          <div>
-            <h2>管理员登录</h2>
-            <p>使用 super_admin、admin 或 support 账号登录。普通用户账号无法进入管理端。</p>
-          </div>
-        </div>
-        <div class="form-grid two">
-          <label>账号<input id="loginUsername" type="text" autocomplete="username" /></label>
-          <label>密码<input id="loginPassword" type="password" autocomplete="current-password" /></label>
-          <button id="loginButton" class="primary">登录</button>
-        </div>
-      </section>
-
       <section id="dashboardView" class="view-grid">
         <article class="metric"><span>用户总数</span><strong id="metricUsers">--</strong></article>
         <article class="metric"><span>封禁用户</span><strong id="metricBanned">--</strong></article>
@@ -79,6 +80,25 @@
           <div class="panel-head"><h2>最近审计</h2><button class="ghost small" data-refresh="dashboard">刷新</button></div>
           <div id="recentAudits" class="list empty">登录后显示最近审计。</div>
         </article>
+      </section>
+
+      <section id="invitesView" class="panel hidden">
+        <div class="panel-head">
+          <div><h2>注册邀请码</h2><p>邀请码明文只在创建成功时显示一次；数据库只保存不可逆摘要。</p></div>
+          <button class="ghost small" data-refresh="invites">刷新</button>
+        </div>
+        <div class="form-grid two invite-create-form">
+          <label>用途备注<input id="inviteNote" type="text" maxlength="256" placeholder="例如：华东运维团队" /></label>
+          <label>可用次数
+            <select id="inviteMaxUses"><option value="1">1 次</option><option value="5">5 次</option><option value="10">10 次</option><option value="50">50 次</option></select>
+          </label>
+          <label>有效期
+            <select id="inviteValidDays"><option value="1">1 天</option><option value="7" selected>7 天</option><option value="30">30 天</option><option value="90">90 天</option></select>
+          </label>
+          <div class="actions"><button id="createInvite" class="primary">生成邀请码</button><button id="cancelInvite" class="ghost">取消填写</button></div>
+        </div>
+        <div id="newInviteResult" class="secret-once hidden" aria-live="polite"></div>
+        <div id="invitesList" class="list empty">暂无邀请码。</div>
       </section>
 
       <section id="usersView" class="panel hidden">
@@ -156,22 +176,25 @@
           <button class="ghost small" data-refresh="policies">刷新</button>
         </div>
         <div class="form-grid two">
-          <label class="check"><input id="registrationEnabled" type="checkbox" /> 允许新用户注册</label>
-          <label>最小密码长度<input id="minPasswordLength" type="number" min="8" max="128" /></label>
+          <label>注册状态<select id="registrationEnabled"><option value="true">允许邀请码注册</option><option value="false">暂停所有注册</option></select></label>
+          <label>最小密码长度<select id="minPasswordLength"><option value="12">12 位</option><option value="14">14 位</option><option value="16">16 位</option><option value="20">20 位</option><option value="24">24 位</option></select></label>
           <label>注册关闭原因<input id="registrationReason" type="text" /></label>
           <label>支持联系方式<input id="supportContact" type="text" /></label>
-          <label>审计保留天数<input id="auditRetentionDays" type="number" min="30" max="3650" /></label>
-          <label>审计清理批量<input id="auditCleanupBatchLimit" type="number" min="100" max="5000" /></label>
-          <label class="check"><input id="assetAutoCleanupEnabled" type="checkbox" /> 自动清理到期资产密文</label>
-          <label>最近删除保留天数<input id="assetRecentDeletedDays" type="number" min="7" max="3650" /></label>
-          <label>最小墓碑保留天数<input id="assetTombstoneDays" type="number" min="0" max="3650" /></label>
-          <label>资产清理批量<input id="assetCleanupBatchLimit" type="number" min="100" max="5000" /></label>
+          <label class="wide-field">允许注册的邮箱后缀<textarea id="allowedEmailDomains" rows="4" placeholder="每行一个，例如 example.com"></textarea></label>
+          <p class="policy-note wide-field">固定安全边界：注册必须使用邀请码；密码必须包含大小写字母、数字和特殊字符。邮箱后缀可在此追加或移除。</p>
+          <label>审计保留天数<select id="auditRetentionDays"><option value="90">90 天</option><option value="180">180 天</option><option value="365">1 年</option><option value="730">2 年</option><option value="1825">5 年</option></select></label>
+          <label>审计清理批量<select id="auditCleanupBatchLimit"><option value="100">100 条</option><option value="500">500 条</option><option value="1000">1,000 条</option><option value="5000">5,000 条</option></select></label>
+          <label>自动清理资产<select id="assetAutoCleanupEnabled"><option value="true">启用</option><option value="false">停用</option></select></label>
+          <label>最近删除保留天数<select id="assetRecentDeletedDays"><option value="30">30 天</option><option value="90">90 天</option><option value="180">180 天</option><option value="365">1 年</option></select></label>
+          <label>最小墓碑保留天数<select id="assetTombstoneDays"><option value="0">永久保留（推荐）</option><option value="365">1 年</option><option value="730">2 年</option><option value="1825">5 年</option></select></label>
+          <label>资产清理批量<select id="assetCleanupBatchLimit"><option value="100">100 条</option><option value="500">500 条</option><option value="1000">1,000 条</option><option value="5000">5,000 条</option></select></label>
           <p class="policy-note wide-field">
             最小墓碑设为 0 表示永久保留（推荐）。非 0 值最低为 365 天，并且只有所有已登记设备均确认删除修订后才会物理回收。
           </p>
           <label class="wide-field">恢复提示<textarea id="recoveryMessage" rows="4"></textarea></label>
           <div class="actions wide-field policy-actions">
             <button id="cleanupAssetTrash" class="danger">立即清理到期资产</button>
+            <button id="cancelPolicies" class="ghost">取消修改</button>
             <button id="savePolicies" class="primary">保存策略</button>
           </div>
         </div>
@@ -186,6 +209,23 @@
           </div>
         </div>
         <div id="backupReport" class="backup-grid empty">登录后可执行备份就绪检查。</div>
+        <article class="migration-card">
+          <div class="panel-head">
+            <div><h2>加密全量迁移包</h2><p>包含管理员、用户、策略、审计、密文资产、同步状态、邀请码和加密的运行参数快照。</p></div>
+            <span class="danger-badge">仅 super_admin</span>
+          </div>
+          <div class="form-grid two">
+            <label>迁移包口令<input id="migrationPassphrase" type="password" minlength="16" autocomplete="new-password" placeholder="至少 16 位，不会保存" /></label>
+            <label>导入旧迁移包<input id="migrationBundleFile" type="file" accept=".otbackup,application/octet-stream" /></label>
+            <label class="wide-field">覆盖恢复确认<input id="restoreAcknowledge" type="text" autocomplete="off" placeholder="导入前请输入 RESTORE" /></label>
+            <p class="policy-note wide-field">恢复会在一个数据库事务内覆盖全部现有业务表，失败自动回滚。容器环境变量不会被运行中的服务自行改写；恢复后必须在 1Panel 核对迁移参数并重启。请先下载当前服务器迁移包作为事故现场备份。</p>
+            <div class="actions wide-field">
+              <button id="clearMigrationForm" class="ghost">取消 / 清空</button>
+              <button id="exportMigrationBundle" class="primary">下载加密迁移包</button>
+              <button id="restoreMigrationBundle" class="danger">覆盖恢复</button>
+            </div>
+          </div>
+        </article>
       </section>
 
       <section id="auditView" class="panel hidden">
@@ -210,6 +250,14 @@
       </section>
 
       <div id="toast" class="toast hidden"></div>
+      <dialog id="confirmDialog" class="confirm-dialog">
+        <form method="dialog">
+          <h2 id="confirmTitle">确认操作</h2>
+          <p id="confirmDescription"></p>
+          <label id="confirmReasonLabel">操作原因<input id="confirmReason" type="text" minlength="2" /></label>
+          <div class="actions"><button value="cancel" class="ghost">取消</button><button value="confirm" class="primary">确认</button></div>
+        </form>
+      </dialog>
     </main>
   </div>
   <script src="/admin-console/assets/app.js"></script>

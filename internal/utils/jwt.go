@@ -26,10 +26,10 @@ type CustomClaims struct {
 }
 
 type TokenPair struct {
-	AccessToken             string
-	RefreshToken            string
-	AccessExpiresInSeconds  int64
-	RefreshExpiresInSeconds int64
+	AccessToken             string `json:"access_token"`
+	RefreshToken            string `json:"refresh_token"`
+	AccessExpiresInSeconds  int64  `json:"expires_in_seconds"`
+	RefreshExpiresInSeconds int64  `json:"refresh_expires_in_seconds"`
 }
 
 func NewJWTManager(secret, issuer string, accessExpireMinutes, refreshExpireDays, legacyExpireHours int) *JWTManager {

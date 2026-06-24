@@ -110,12 +110,13 @@ func (s *backupReadinessService) databaseStatus() (DatabaseBackupStatus, []strin
 	warnings := make([]string, 0)
 	counts := map[string]int64{}
 	tables := map[string]any{
-		"users":               &model.User{},
-		"server_configs":      &model.ServerConfig{},
-		"config_sync_changes": &model.ConfigSyncChange{},
-		"sync_device_states":  &model.SyncDeviceState{},
-		"admin_audit_logs":    &model.AdminAuditLog{},
-		"system_settings":     &model.SystemSetting{},
+		"users":                &model.User{},
+		"server_configs":       &model.ServerConfig{},
+		"config_sync_changes":  &model.ConfigSyncChange{},
+		"sync_device_states":   &model.SyncDeviceState{},
+		"admin_audit_logs":     &model.AdminAuditLog{},
+		"system_settings":      &model.SystemSetting{},
+		"registration_invites": &model.RegistrationInvite{},
 	}
 
 	for table, modelRef := range tables {
@@ -132,8 +133,8 @@ func (s *backupReadinessService) databaseStatus() (DatabaseBackupStatus, []strin
 		Reachable:    reachable,
 		Dialect:      s.db.Dialector.Name(),
 		TableCounts:  counts,
-		BackupMethod: "pg_dump / 1Panel PostgreSQL backup",
-		Hint:         "建议在数据库容器内执行 pg_dump，或使用 1Panel 数据库备份功能；不要只备份 orbit-api 容器。",
+		BackupMethod: "encrypted migration bundle + pg_dump / 1Panel PostgreSQL backup",
+		Hint:         "管理端加密迁移包适合整机迁移；生产灾备仍建议同时保留经过恢复演练的 pg_dump/1Panel 数据库备份。",
 	}, warnings, nil
 }
 
@@ -154,6 +155,7 @@ func (s *backupReadinessService) environmentChecks() []EnvironmentCheck {
 func recommendedBackupItems() []BackupItem {
 	return []BackupItem{
 		{Name: "PostgreSQL 数据库快照", Required: true, Description: "包含用户、云端密文配置、同步修订、设备确认水位、审计日志与系统策略。"},
+		{Name: "管理端加密全量迁移包", Required: true, Description: "包含全部业务表与加密运行参数快照；口令必须与文件分开保管。"},
 		{Name: "脱敏环境变量快照", Required: true, Description: "记录变量是否存在与脱敏形态，密钥原文需由管理员在安全密码库保存。"},
 		{Name: "后端镜像版本号", Required: true, Description: "记录 GHCR 镜像 tag/digest，便于回滚到一致版本。"},
 		{Name: "1Panel 反向代理与域名配置", Required: true, Description: "包含 HTTPS 证书来源、server.orbitterm.com 指向与容器端口映射。"},

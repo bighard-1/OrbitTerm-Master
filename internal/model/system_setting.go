@@ -36,25 +36,31 @@ func (SystemSetting) TableName() string {
 // SecurityPolicy 是管理端可动态调整的基础安全策略。
 // 注意：普通用户注册永远只能落为 user 角色，避免配置错误导致越权。
 type SecurityPolicy struct {
-	RegistrationEnabled        bool   `json:"registration_enabled"`
-	RegistrationDisabledReason string `json:"registration_disabled_reason,omitempty"`
-	MinPasswordLength          int    `json:"min_password_length"`
-	DefaultUserRole            string `json:"default_user_role"`
-	DefaultUserStatus          string `json:"default_user_status"`
+	RegistrationEnabled        bool     `json:"registration_enabled"`
+	RegistrationDisabledReason string   `json:"registration_disabled_reason,omitempty"`
+	MinPasswordLength          int      `json:"min_password_length"`
+	InvitationRequired         bool     `json:"invitation_required"`
+	AllowedEmailDomains        []string `json:"allowed_email_domains"`
+	StrictPasswordComplexity   bool     `json:"strict_password_complexity"`
+	DefaultUserRole            string   `json:"default_user_role"`
+	DefaultUserStatus          string   `json:"default_user_status"`
 }
 
 func DefaultSecurityPolicy() SecurityPolicy {
 	return SecurityPolicy{
-		RegistrationEnabled: true,
-		MinPasswordLength:   8,
-		DefaultUserRole:     UserRoleUser,
-		DefaultUserStatus:   UserStatusNormal,
+		RegistrationEnabled:      true,
+		MinPasswordLength:        12,
+		InvitationRequired:       true,
+		AllowedEmailDomains:      DefaultAllowedEmailDomains(),
+		StrictPasswordComplexity: true,
+		DefaultUserRole:          UserRoleUser,
+		DefaultUserStatus:        UserStatusNormal,
 	}
 }
 
 func (p *SecurityPolicy) Normalize() {
-	if p.MinPasswordLength < 8 {
-		p.MinPasswordLength = 8
+	if p.MinPasswordLength < 12 {
+		p.MinPasswordLength = 12
 	}
 	if p.MinPasswordLength > 128 {
 		p.MinPasswordLength = 128
@@ -70,6 +76,37 @@ func (p *SecurityPolicy) Normalize() {
 		p.DefaultUserStatus = UserStatusNormal
 	}
 	p.RegistrationDisabledReason = strings.TrimSpace(p.RegistrationDisabledReason)
+	p.InvitationRequired = true
+	p.StrictPasswordComplexity = true
+	p.AllowedEmailDomains = NormalizeEmailDomains(p.AllowedEmailDomains)
+	if len(p.AllowedEmailDomains) == 0 {
+		p.AllowedEmailDomains = DefaultAllowedEmailDomains()
+	}
+}
+
+func DefaultAllowedEmailDomains() []string {
+	return []string{
+		"gmail.com", "outlook.com", "hotmail.com", "icloud.com", "yahoo.com",
+		"proton.me", "protonmail.com", "qq.com", "foxmail.com", "163.com",
+		"126.com", "yeah.net", "sina.com", "sohu.com", "aliyun.com",
+	}
+}
+
+func NormalizeEmailDomains(domains []string) []string {
+	seen := make(map[string]struct{}, len(domains))
+	normalized := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		domain = strings.TrimPrefix(strings.ToLower(strings.TrimSpace(domain)), "@")
+		if domain == "" || strings.ContainsAny(domain, " /\\:") || !strings.Contains(domain, ".") {
+			continue
+		}
+		if _, exists := seen[domain]; exists {
+			continue
+		}
+		seen[domain] = struct{}{}
+		normalized = append(normalized, domain)
+	}
+	return normalized
 }
 
 const (

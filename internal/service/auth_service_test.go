@@ -12,7 +12,7 @@ func TestAuthServiceRegisterRejectsClosedRegistration(t *testing.T) {
 	policy.RegistrationEnabled = false
 	svc := NewAuthService(newFakeUserRepo(), newTestJWTManager(), fakeSecurityPolicyProvider{policy: policy})
 
-	_, err := svc.Register("alice", "StrongPass123")
+	_, err := svc.Register("alice@example.com", "StrongPass123!", "")
 	if !errors.Is(err, ErrRegistrationClosed) {
 		t.Fatalf("expected ErrRegistrationClosed, got %v", err)
 	}
@@ -25,12 +25,14 @@ func TestAuthServiceRegisterUsesSecurityPolicy(t *testing.T) {
 	userRepo := newFakeUserRepo()
 	svc := NewAuthService(userRepo, newTestJWTManager(), fakeSecurityPolicyProvider{policy: policy})
 
-	_, err := svc.Register("alice", "shortpass")
-	if !errors.Is(err, ErrInvalidInput) {
-		t.Fatalf("expected ErrInvalidInput for short password, got %v", err)
+	_, err := svc.Register("alice@gmail.com", "shortpass", "")
+	if !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("expected ErrWeakPassword for short password, got %v", err)
 	}
 
-	user, err := svc.Register("alice", "StrongPass123")
+	userRepo = newFakeUserRepo()
+	svc = NewAuthService(userRepo, newTestJWTManager(), fakeSecurityPolicyProvider{policy: policy}, fakeInviteConsumer{})
+	user, err := svc.Register("alice@gmail.com", "StrongPass123!", "valid-invite")
 	if err != nil {
 		t.Fatalf("Register failed: %v", err)
 	}
@@ -38,6 +40,23 @@ func TestAuthServiceRegisterUsesSecurityPolicy(t *testing.T) {
 		t.Fatalf("expected policy-backed user role/status, got %+v", user)
 	}
 }
+
+func TestAuthServiceRegisterRequiresAllowedEmailAndInvite(t *testing.T) {
+	policy := model.DefaultSecurityPolicy()
+	svc := NewAuthService(newFakeUserRepo(), newTestJWTManager(), fakeSecurityPolicyProvider{policy: policy}, fakeInviteConsumer{err: ErrInviteInvalid})
+
+	if _, err := svc.Register("alice@unknown.test", "StrongPass123!", "invite"); !errors.Is(err, ErrEmailDomainDenied) {
+		t.Fatalf("expected ErrEmailDomainDenied, got %v", err)
+	}
+	if _, err := svc.Register("alice@gmail.com", "StrongPass123!", "invalid"); !errors.Is(err, ErrInviteInvalid) {
+		t.Fatalf("expected ErrInviteInvalid, got %v", err)
+	}
+}
+
+type fakeInviteConsumer struct{ err error }
+
+func (f fakeInviteConsumer) Consume(string) error { return f.err }
+func (f fakeInviteConsumer) Release(string) error { return nil }
 
 type fakeSecurityPolicyProvider struct {
 	policy model.SecurityPolicy

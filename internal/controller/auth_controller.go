@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"orbitterm-server/internal/common"
+	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/service"
 
 	"github.com/gin-gonic/gin"
@@ -14,23 +15,22 @@ import (
 type AuthController struct {
 	authService    service.AuthService
 	recoveryPolicy service.RecoveryPolicyReader
+	securityPolicy service.SecurityPolicyProvider
 }
 
-func NewAuthController(authService service.AuthService, recoveryPolicies ...service.RecoveryPolicyReader) *AuthController {
-	var recoveryPolicy service.RecoveryPolicyReader
-	if len(recoveryPolicies) > 0 {
-		recoveryPolicy = recoveryPolicies[0]
-	}
+func NewAuthController(authService service.AuthService, recoveryPolicy service.RecoveryPolicyReader, securityPolicy service.SecurityPolicyProvider) *AuthController {
 	return &AuthController{
 		authService:    authService,
 		recoveryPolicy: recoveryPolicy,
+		securityPolicy: securityPolicy,
 	}
 }
 
 // registerRequest 对应注册接口请求体。
 type registerRequest struct {
-	Username string `json:"username" binding:"required"`
-	Password string `json:"password" binding:"required"`
+	Username   string `json:"username" binding:"required"`
+	Password   string `json:"password" binding:"required"`
+	InviteCode string `json:"invite_code" binding:"required"`
 }
 
 // loginRequest 对应登录接口请求体。
@@ -61,11 +61,19 @@ func (c *AuthController) Register(ctx *gin.Context) {
 		return
 	}
 
-	user, err := c.authService.Register(req.Username, req.Password)
+	user, err := c.authService.Register(req.Username, req.Password, req.InviteCode)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrInvalidInput):
-			common.Error(ctx, http.StatusBadRequest, "用户名至少 3 位且密码不符合当前安全策略")
+			common.Error(ctx, http.StatusBadRequest, "注册信息不符合当前安全策略")
+		case errors.Is(err, service.ErrEmailDomainDenied):
+			common.Error(ctx, http.StatusBadRequest, "请使用管理员允许的邮箱域名注册")
+		case errors.Is(err, service.ErrWeakPassword):
+			common.Error(ctx, http.StatusBadRequest, "密码至少 12 位，并包含大写字母、小写字母、数字和特殊字符")
+		case errors.Is(err, service.ErrInviteRequired):
+			common.Error(ctx, http.StatusBadRequest, "注册需要邀请码")
+		case errors.Is(err, service.ErrInviteInvalid):
+			common.Error(ctx, http.StatusForbidden, "邀请码无效、已过期或已用完")
 		case errors.Is(err, service.ErrRegistrationClosed):
 			common.Error(ctx, http.StatusForbidden, "注册已关闭，请联系管理员")
 		case errors.Is(err, service.ErrUserAlreadyExists):
@@ -80,6 +88,24 @@ func (c *AuthController) Register(ctx *gin.Context) {
 		"id":         user.ID,
 		"username":   user.Username,
 		"created_at": user.CreatedAt,
+	})
+}
+
+func (c *AuthController) RegistrationPolicy(ctx *gin.Context) {
+	policy := model.DefaultSecurityPolicy()
+	if c.securityPolicy != nil {
+		configured, err := c.securityPolicy.GetSecurityPolicy()
+		if err != nil {
+			common.Error(ctx, http.StatusInternalServerError, "注册策略读取失败")
+			return
+		}
+		policy = configured
+	}
+	policy.Normalize()
+	common.Success(ctx, http.StatusOK, gin.H{
+		"invitation_required":        policy.InvitationRequired,
+		"min_password_length":        policy.MinPasswordLength,
+		"strict_password_complexity": policy.StrictPasswordComplexity,
 	})
 }
 

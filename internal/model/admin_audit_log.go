@@ -8,6 +8,8 @@ const (
 	AuditActionAdminMe                   = "admin_me"
 	AuditActionSystemBackupReadinessView = "system_backup_readiness_view"
 	AuditActionSystemDiagnosticsExport   = "system_diagnostics_export"
+	AuditActionMigrationBundleExport     = "migration_bundle_export"
+	AuditActionMigrationBundleRestore    = "migration_bundle_restore"
 	AuditActionUserBan                   = "user_ban"
 	AuditActionUserAutoUnban             = "user_auto_unban"
 	AuditActionUserUnban                 = "user_unban"

@@ -14,7 +14,7 @@ func TestSecurityPolicyServiceReturnsDefaultWhenMissing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetSecurityPolicy failed: %v", err)
 	}
-	if !policy.RegistrationEnabled || policy.MinPasswordLength != 8 || policy.DefaultUserRole != model.UserRoleUser || policy.DefaultUserStatus != model.UserStatusNormal {
+	if !policy.RegistrationEnabled || policy.MinPasswordLength != 12 || !policy.InvitationRequired || !policy.StrictPasswordComplexity || len(policy.AllowedEmailDomains) == 0 || policy.DefaultUserRole != model.UserRoleUser || policy.DefaultUserStatus != model.UserStatusNormal {
 		t.Fatalf("unexpected default policy: %+v", policy)
 	}
 }
@@ -38,7 +38,7 @@ func TestSecurityPolicyServiceUpdateNormalizesAndAudits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UpdateSecurityPolicy failed: %v", err)
 	}
-	if policy.RegistrationEnabled || policy.RegistrationDisabledReason != reason || policy.MinPasswordLength != 8 || policy.DefaultUserRole != model.UserRoleUser || policy.DefaultUserStatus != model.UserStatusRisk {
+	if policy.RegistrationEnabled || policy.RegistrationDisabledReason != reason || policy.MinPasswordLength != 12 || policy.DefaultUserRole != model.UserRoleUser || policy.DefaultUserStatus != model.UserStatusRisk {
 		t.Fatalf("unexpected normalized policy: %+v", policy)
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != model.AuditActionSystemSecurityPolicyUpdate {

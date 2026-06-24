@@ -14,11 +14,12 @@ type SecurityPolicyProvider interface {
 }
 
 type SecurityPolicyUpdate struct {
-	RegistrationEnabled        *bool   `json:"registration_enabled,omitempty"`
-	RegistrationDisabledReason *string `json:"registration_disabled_reason,omitempty"`
-	MinPasswordLength          *int    `json:"min_password_length,omitempty"`
-	DefaultUserStatus          *string `json:"default_user_status,omitempty"`
-	Reason                     string  `json:"reason,omitempty"`
+	RegistrationEnabled        *bool     `json:"registration_enabled,omitempty"`
+	RegistrationDisabledReason *string   `json:"registration_disabled_reason,omitempty"`
+	MinPasswordLength          *int      `json:"min_password_length,omitempty"`
+	AllowedEmailDomains        *[]string `json:"allowed_email_domains,omitempty"`
+	DefaultUserStatus          *string   `json:"default_user_status,omitempty"`
+	Reason                     string    `json:"reason,omitempty"`
 }
 
 type SecurityPolicyService interface {
@@ -76,6 +77,12 @@ func (s *securityPolicyService) UpdateSecurityPolicy(adminID uint, update Securi
 	}
 	if update.MinPasswordLength != nil {
 		policy.MinPasswordLength = *update.MinPasswordLength
+	}
+	if update.AllowedEmailDomains != nil {
+		policy.AllowedEmailDomains = model.NormalizeEmailDomains(*update.AllowedEmailDomains)
+		if len(policy.AllowedEmailDomains) == 0 {
+			return model.SecurityPolicy{}, ErrInvalidInput
+		}
 	}
 	if update.DefaultUserStatus != nil {
 		policy.DefaultUserStatus = strings.TrimSpace(*update.DefaultUserStatus)

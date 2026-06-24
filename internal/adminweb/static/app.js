@@ -14,7 +14,8 @@ const state = {
 const $ = (id) => document.getElementById(id);
 
 const api = async (path, options = {}) => {
-  const headers = { 'Content-Type': 'application/json', ...(options.headers || {}) };
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
+  const headers = { ...(isFormData ? {} : { 'Content-Type': 'application/json' }), ...(options.headers || {}) };
   if (state.token) headers.Authorization = `Bearer ${state.token}`;
   const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({ success: false, error: '响应不是 JSON' }));
@@ -40,7 +41,8 @@ function setAuth(token) {
 		clearSensitiveViews();
 	}
 	$('statusPill').textContent = state.token ? '已登录' : '未登录';
-	$('loginPanel').classList.toggle('hidden', Boolean(state.token));
+	$('authScreen').classList.toggle('hidden', Boolean(state.token));
+	$('appShell').classList.toggle('hidden', !state.token);
 }
 
 function clearSensitiveViews() {
@@ -58,7 +60,9 @@ function clearSensitiveViews() {
 	$('autoUnbanHint').textContent = '等待检查';
 	$('metricTokenPolicy').textContent = '--';
 	$('tokenPolicyHint').textContent = '等待检查';
-	['recentAudits', 'usersList', 'auditList', 'backupReport'].forEach(id => $(id).classList.add('empty'));
+	$('invitesList').textContent = '登录后显示邀请码。';
+	$('newInviteResult').classList.add('hidden');
+	['recentAudits', 'usersList', 'invitesList', 'auditList', 'backupReport'].forEach(id => $(id).classList.add('empty'));
 	$('userDetail').classList.add('hidden');
 	$('userDetail').innerHTML = '';
 	renderUserPager();
@@ -66,10 +70,10 @@ function clearSensitiveViews() {
 
 function showView(view) {
   state.currentView = view;
-  const titles = { dashboard: '仪表盘', users: '用户治理', policies: '系统策略', backup: '备份自检', audit: '审计日志' };
+  const titles = { dashboard: '仪表盘', users: '用户治理', invites: '注册邀请码', policies: '系统策略', backup: '备份自检', audit: '审计日志' };
   $('pageTitle').textContent = titles[view] || '仪表盘';
   document.querySelectorAll('.nav-item').forEach(btn => btn.classList.toggle('active', btn.dataset.view === view));
-  ['dashboard', 'users', 'policies', 'backup', 'audit'].forEach(name => {
+  ['dashboard', 'users', 'invites', 'policies', 'backup', 'audit'].forEach(name => {
     $(`${name}View`).classList.toggle('hidden', name !== view);
   });
   if (state.token) refresh(view).catch(err => toast(err.message));
@@ -85,7 +89,11 @@ async function login() {
     method: 'POST',
     body: JSON.stringify({ username: $('loginUsername').value.trim(), password: $('loginPassword').value })
   });
-  setAuth(data.access_token || data.token);
+  const token = data.access_token || data.token || data.AccessToken;
+  if (!token) throw new Error('登录响应缺少访问令牌，请升级后端后重试');
+  setAuth(token);
+  $('loginPassword').value = '';
+  await api('/api/v1/admin/me');
   toast('登录成功');
   await refresh(state.currentView);
 }
@@ -104,6 +112,7 @@ async function refresh(view) {
   if (!state.token) return;
   if (view === 'dashboard') return loadDashboard();
   if (view === 'users') return loadUsers();
+  if (view === 'invites') return loadInvites();
   if (view === 'policies') return loadPolicies();
   if (view === 'backup') return loadBackup();
   if (view === 'audit') return loadAudit();
@@ -188,30 +197,31 @@ async function loadPolicies() {
     api('/api/v1/admin/system/audit-policy'),
     api('/api/v1/admin/system/asset-deletion-policy')
   ]);
-  $('registrationEnabled').checked = Boolean(security.registration_enabled);
-  $('minPasswordLength').value = security.min_password_length || 8;
+  $('registrationEnabled').value = String(Boolean(security.registration_enabled));
+  setSelectValue('minPasswordLength', security.min_password_length || 12);
   $('registrationReason').value = security.registration_disabled_reason || '';
+  $('allowedEmailDomains').value = (security.allowed_email_domains || []).join('\n');
   $('supportContact').value = recovery.support_contact || '';
   $('recoveryMessage').value = recovery.user_facing_message || '';
-  $('auditRetentionDays').value = auditPolicy.retention_days || 180;
-  $('auditCleanupBatchLimit').value = auditPolicy.cleanup_batch_limit || 500;
-  $('assetAutoCleanupEnabled').checked = Boolean(assetDeletionPolicy.auto_cleanup_enabled);
-  $('assetRecentDeletedDays').value = assetDeletionPolicy.recent_deleted_retention_days || 90;
-  $('assetTombstoneDays').value = assetDeletionPolicy.tombstone_retention_days ?? 0;
-  $('assetCleanupBatchLimit').value = assetDeletionPolicy.cleanup_batch_limit || 500;
+  setSelectValue('auditRetentionDays', auditPolicy.retention_days || 180);
+  setSelectValue('auditCleanupBatchLimit', auditPolicy.cleanup_batch_limit || 500);
+  $('assetAutoCleanupEnabled').value = String(Boolean(assetDeletionPolicy.auto_cleanup_enabled));
+  setSelectValue('assetRecentDeletedDays', assetDeletionPolicy.recent_deleted_retention_days || 90);
+  setSelectValue('assetTombstoneDays', assetDeletionPolicy.tombstone_retention_days ?? 0);
+  setSelectValue('assetCleanupBatchLimit', assetDeletionPolicy.cleanup_batch_limit || 500);
 }
 
 async function savePolicies() {
-  const reason = promptReason('更新系统策略原因');
-  if (!reason) return;
-  if (!requireTypedConfirmation('更新资产删除与保留策略')) return;
+  const confirmation = await confirmAction('保存系统策略', '这会立即影响新用户注册、审计保留和资产清理。', true);
+  if (!confirmation.confirmed) return;
+  const reason = confirmation.reason;
   await api('/api/v1/admin/system/asset-deletion-policy', {
     method: 'PUT',
     body: JSON.stringify({
       recent_deleted_retention_days: Number($('assetRecentDeletedDays').value || 90),
       tombstone_retention_days: Number($('assetTombstoneDays').value || 0),
       cleanup_batch_limit: Number($('assetCleanupBatchLimit').value || 500),
-      auto_cleanup_enabled: $('assetAutoCleanupEnabled').checked,
+      auto_cleanup_enabled: $('assetAutoCleanupEnabled').value === 'true',
       reason,
       confirmation: 'CONFIRM'
     })
@@ -219,9 +229,10 @@ async function savePolicies() {
   await api('/api/v1/admin/system/security-policy', {
     method: 'PUT',
     body: JSON.stringify({
-      registration_enabled: $('registrationEnabled').checked,
+      registration_enabled: $('registrationEnabled').value === 'true',
       registration_disabled_reason: $('registrationReason').value.trim(),
-      min_password_length: Number($('minPasswordLength').value || 8),
+      min_password_length: Number($('minPasswordLength').value || 12),
+      allowed_email_domains: parseEmailDomains(),
       reason
     })
   });
@@ -245,6 +256,98 @@ async function savePolicies() {
   await loadPolicies();
 }
 
+function setSelectValue(id, value) {
+  const select = $(id);
+  const normalized = String(value);
+  if (![...select.options].some(option => option.value === normalized)) {
+    const option = document.createElement('option');
+    option.value = normalized;
+    option.textContent = `${normalized}（当前自定义值）`;
+    select.appendChild(option);
+  }
+  select.value = normalized;
+}
+
+function parseEmailDomains() {
+  return [...new Set($('allowedEmailDomains').value
+    .split(/[\n,;]+/)
+    .map(value => value.trim().toLowerCase().replace(/^@/, ''))
+    .filter(Boolean))];
+}
+
+async function loadInvites() {
+  const data = await api('/api/v1/admin/registration-invites?limit=100&offset=0');
+  renderList($('invitesList'), data.items || [], inviteRow);
+}
+
+function inviteRow(invite) {
+  const row = document.createElement('div');
+  row.className = 'row';
+  const available = !invite.disabled_at && (!invite.expires_at || new Date(invite.expires_at) > new Date()) && invite.use_count < invite.max_uses;
+  row.innerHTML = `<div><strong>${escapeHtml(invite.code_prefix)}… · ${escapeHtml(invite.note || '无备注')}</strong><small>${invite.use_count}/${invite.max_uses} 次 · 到期 ${formatDate(invite.expires_at) || '永不过期'} · ${available ? '可用' : '不可用'}</small></div>`;
+  const actions = document.createElement('div');
+  actions.className = 'actions';
+  if (available) actions.append(actionButton('撤销', 'danger', () => revokeInvite(invite.id)));
+  row.append(actions);
+  return row;
+}
+
+async function createInvite() {
+  const confirmation = await confirmAction('生成注册邀请码', '邀请码明文仅显示一次，请妥善传递。', true);
+  if (!confirmation.confirmed) return;
+  const result = await api('/api/v1/admin/registration-invites', {
+    method: 'POST',
+    body: JSON.stringify({
+      note: $('inviteNote').value.trim(),
+      max_uses: Number($('inviteMaxUses').value),
+      valid_days: Number($('inviteValidDays').value),
+      reason: confirmation.reason,
+      confirmation: 'CONFIRM'
+    })
+  });
+  const node = $('newInviteResult');
+  node.classList.remove('hidden');
+  node.innerHTML = `<strong>请立即保存，此邀请码不会再次显示</strong><code>${escapeHtml(result.code)}</code><button id="copyInvite" class="ghost small">复制</button>`;
+  $('copyInvite').addEventListener('click', () => navigator.clipboard.writeText(result.code).then(() => toast('邀请码已复制')));
+  await loadInvites();
+}
+
+async function revokeInvite(inviteID) {
+  const confirmation = await confirmAction('撤销邀请码', '撤销后不能恢复，已注册用户不受影响。', true);
+  if (!confirmation.confirmed) return;
+  await api(`/api/v1/admin/registration-invites/${inviteID}/revoke`, {
+    method: 'POST', body: JSON.stringify({ reason: confirmation.reason, confirmation: 'CONFIRM' })
+  });
+  await loadInvites();
+}
+
+function resetInviteForm() {
+  $('inviteNote').value = '';
+  $('inviteMaxUses').value = '1';
+  $('inviteValidDays').value = '7';
+  $('newInviteResult').classList.add('hidden');
+  $('newInviteResult').textContent = '';
+}
+
+function confirmAction(title, description, requireReason = false) {
+  const dialog = $('confirmDialog');
+  $('confirmTitle').textContent = title;
+  $('confirmDescription').textContent = description;
+  $('confirmReasonLabel').classList.toggle('hidden', !requireReason);
+  $('confirmReason').value = '';
+  return new Promise(resolve => {
+    const onClose = () => {
+      dialog.removeEventListener('close', onClose);
+      const reason = $('confirmReason').value.trim();
+      const confirmed = dialog.returnValue === 'confirm' && (!requireReason || reason.length >= 2);
+      if (dialog.returnValue === 'confirm' && requireReason && reason.length < 2) toast('操作原因至少需要 2 个字符');
+      resolve({ confirmed, reason });
+    };
+    dialog.addEventListener('close', onClose);
+    dialog.showModal();
+  });
+}
+
 async function cleanupAssetTrash() {
   const reason = promptReason('立即清理到期资产原因');
   if (!reason) return;
@@ -259,6 +362,59 @@ async function cleanupAssetTrash() {
 async function loadBackup() {
   const data = await api('/api/v1/admin/system/backup-readiness');
   renderBackup(data);
+}
+
+function migrationPassphrase() {
+  const value = $('migrationPassphrase').value;
+  if (value.length < 16 || value.trim() !== value) throw new Error('迁移包口令至少 16 位，且首尾不能有空格');
+  return value;
+}
+
+async function exportMigrationBundle() {
+  const passphrase = migrationPassphrase();
+  const confirmation = await confirmAction('导出加密全量迁移包', '迁移包包含完整数据库和加密运行参数，请只保存到受控位置。', true);
+  if (!confirmation.confirmed) return;
+  const response = await fetch('/api/v1/admin/system/migration-bundle/export', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${state.token}` },
+    body: JSON.stringify({ passphrase, reason: confirmation.reason, confirmation: 'CONFIRM' })
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    if (response.status === 401) setAuth('');
+    throw new Error(payload.error || `导出失败 HTTP ${response.status}`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('Content-Disposition') || '';
+  const matched = disposition.match(/filename="?([^";]+)"?/i);
+  const filename = matched?.[1] || `orbitterm-full-migration-${new Date().toISOString().replace(/[:.]/g, '-')}.otbackup`;
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url; link.download = filename; link.click(); URL.revokeObjectURL(url);
+  toast('加密迁移包已下载，请安全保存口令并验证文件可读取');
+}
+
+async function restoreMigrationBundle() {
+  const passphrase = migrationPassphrase();
+  const file = $('migrationBundleFile').files?.[0];
+  if (!file) throw new Error('请选择 .otbackup 迁移包');
+  if ($('restoreAcknowledge').value.trim() !== 'RESTORE') throw new Error('覆盖恢复前请输入 RESTORE');
+  const confirmation = await confirmAction('覆盖恢复全部数据', '现有管理员、用户、策略、审计和密文资产将被迁移包替换。失败会回滚。', true);
+  if (!confirmation.confirmed) return;
+  const form = new FormData();
+  form.append('bundle', file);
+  form.append('passphrase', passphrase);
+  form.append('reason', confirmation.reason);
+  form.append('confirmation', 'CONFIRM');
+  const result = await api('/api/v1/admin/system/migration-bundle/restore', { method: 'POST', body: form });
+  setAuth('');
+  window.alert(`${result.message}\n\n已恢复 ${result.table_counts?.users || 0} 个用户。请核对 1Panel 环境变量、重启服务后重新登录。`);
+}
+
+function clearMigrationForm() {
+  $('migrationPassphrase').value = '';
+  $('migrationBundleFile').value = '';
+  $('restoreAcknowledge').value = '';
 }
 
 async function loadAudit() {
@@ -648,9 +804,15 @@ $('loginButton').addEventListener('click', () => login().catch(err => toast(err.
 $('bootstrapButton').addEventListener('click', () => bootstrap().catch(err => toast(err.message)));
 $('logoutButton').addEventListener('click', () => { setAuth(''); hideUserDetail(); toast('已退出'); });
 $('savePolicies').addEventListener('click', () => savePolicies().catch(err => toast(err.message)));
+$('cancelPolicies').addEventListener('click', () => loadPolicies().then(() => toast('未保存的策略修改已取消')).catch(err => toast(err.message)));
+$('createInvite').addEventListener('click', () => createInvite().catch(err => toast(err.message)));
+$('cancelInvite').addEventListener('click', resetInviteForm);
 $('cleanupAssetTrash').addEventListener('click', () => cleanupAssetTrash().catch(err => toast(err.message)));
 $('refreshBackup').addEventListener('click', () => loadBackup().catch(err => toast(err.message)));
 $('exportDiagnostics').addEventListener('click', () => exportDiagnostics().catch(err => toast(err.message)));
+$('exportMigrationBundle').addEventListener('click', () => exportMigrationBundle().catch(err => toast(err.message)));
+$('restoreMigrationBundle').addEventListener('click', () => restoreMigrationBundle().catch(err => toast(err.message)));
+$('clearMigrationForm').addEventListener('click', clearMigrationForm);
 $('scanExpiredBans').addEventListener('click', () => highRisk('/api/v1/admin/users/expired-bans/scan', { limit: 100, reason: promptReason('扫描原因') }));
 $('forceLogoutRegularUsers').addEventListener('click', () => forceLogoutRegularUsers().catch(err => toast(err.message)));
 $('batchBan').addEventListener('click', () => batchUserAction('ban').catch(err => toast(err.message)));
@@ -672,6 +834,21 @@ document.querySelectorAll('[data-refresh]').forEach(btn => btn.addEventListener(
   if (event.key === 'Enter') login().catch(err => toast(err.message));
 }));
 
-setAuth(state.token);
-checkBootstrap().catch(err => toast(err.message));
-showView('dashboard');
+async function initialize() {
+  await checkBootstrap();
+  if (state.token) {
+    try {
+      await api('/api/v1/admin/me');
+      setAuth(state.token);
+    } catch (err) {
+      setAuth('');
+      toast('管理会话已失效，请重新登录');
+      return;
+    }
+  } else {
+    setAuth('');
+  }
+  showView('dashboard');
+}
+
+initialize().catch(err => toast(err.message));
