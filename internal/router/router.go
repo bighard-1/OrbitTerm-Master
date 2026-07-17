@@ -35,12 +35,14 @@ func Register(
 			auth.POST("/refresh", middleware.IPRateLimit(120, time.Minute), authController.Refresh)
 			auth.GET("/recovery-info", middleware.IPRateLimit(60, time.Minute), authController.RecoveryInfo)
 			auth.GET("/registration-policy", middleware.IPRateLimit(60, time.Minute), authController.RegistrationPolicy)
+			auth.POST("/password", middleware.JWTAuthMiddleware(jwtManager, userRepo), middleware.IPRateLimit(10, time.Hour), authController.ChangePassword)
 		}
 
 		configGroup := v1.Group("/config")
 		configGroup.Use(middleware.JWTAuthMiddleware(jwtManager, userRepo))
 		{
 			configGroup.POST("/upload", configController.Upload)
+			configGroup.POST("/master-key/rotate", middleware.IPRateLimit(5, time.Hour), configController.RotateMasterKey)
 			configGroup.GET("/pull", configController.Pull)
 			configGroup.GET("/trash", configController.Trash)
 			configGroup.GET("/sync/pull", configController.PullChanges)

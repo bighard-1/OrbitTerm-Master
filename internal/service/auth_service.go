@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
@@ -19,6 +20,7 @@ var (
 	ErrRegistrationClosed = errors.New("注册已关闭")
 	ErrEmailDomainDenied  = errors.New("邮箱域名不允许注册")
 	ErrWeakPassword       = errors.New("密码复杂度不足")
+	ErrPasswordUnchanged  = errors.New("新密码不能与当前密码相同")
 )
 
 // AuthService 提供身份认证相关业务逻辑。
@@ -26,6 +28,7 @@ type AuthService interface {
 	Register(username, password, inviteCode string) (*model.User, error)
 	Login(username, password string) (*utils.TokenPair, error)
 	Refresh(refreshToken string) (*utils.TokenPair, error)
+	ChangePassword(userID uint, currentPassword, newPassword string) (*utils.TokenPair, error)
 }
 
 type authService struct {
@@ -62,7 +65,7 @@ func (s *authService) Register(username, password, inviteCode string) (*model.Us
 		return nil, ErrRegistrationClosed
 	}
 
-	username = strings.ToLower(strings.TrimSpace(username))
+	username = identity.CanonicalUsername(username)
 	if !ValidateRegistrationEmail(username, policy.AllowedEmailDomains) {
 		return nil, ErrEmailDomainDenied
 	}
@@ -125,7 +128,7 @@ func (s *authService) securityPolicy() (model.SecurityPolicy, error) {
 // 2) 校验 Argon2id 哈希；
 // 3) 签发 JWT。
 func (s *authService) Login(username, password string) (*utils.TokenPair, error) {
-	username = strings.TrimSpace(username)
+	username = identity.CanonicalUsername(username)
 	if username == "" || password == "" {
 		return nil, ErrInvalidInput
 	}
@@ -183,6 +186,63 @@ func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 
 	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion)
 	if err != nil {
+		return nil, err
+	}
+	return pair, nil
+}
+
+// ChangePassword verifies the current credential, applies the same policy as
+// registration, and rotates TokenVersion. A freshly issued pair keeps only the
+// caller signed in; every pre-change access and refresh token is invalidated.
+func (s *authService) ChangePassword(userID uint, currentPassword, newPassword string) (*utils.TokenPair, error) {
+	if userID == 0 || currentPassword == "" || newPassword == "" {
+		return nil, ErrInvalidInput
+	}
+
+	policy, err := s.securityPolicy()
+	if err != nil {
+		return nil, err
+	}
+	if !ValidateStrongPassword(newPassword, policy.MinPasswordLength) {
+		return nil, ErrWeakPassword
+	}
+
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return nil, err
+	}
+	if user == nil {
+		return nil, ErrInvalidCredential
+	}
+	if err := s.ensureUserCanAuthenticate(user); err != nil {
+		return nil, err
+	}
+
+	matched, err := utils.VerifyPasswordArgon2ID(currentPassword, user.PasswordHash)
+	if err != nil {
+		return nil, err
+	}
+	if !matched {
+		return nil, ErrInvalidCredential
+	}
+	if currentPassword == newPassword {
+		return nil, ErrPasswordUnchanged
+	}
+
+	hashed, err := utils.HashPasswordArgon2ID(newPassword)
+	if err != nil {
+		return nil, err
+	}
+	// Build the replacement before persisting the version change. Token signing
+	// is side-effect free, so a failure cannot strand the caller without a token.
+	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion+1)
+	if err != nil {
+		return nil, err
+	}
+	user.PasswordHash = hashed
+	user.TokenVersion++
+	user.MustChangePassword = false
+	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
 	return pair, nil

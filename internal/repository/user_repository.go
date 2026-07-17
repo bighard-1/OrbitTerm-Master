@@ -4,6 +4,7 @@ import (
 	"errors"
 	"time"
 
+	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 
 	"gorm.io/gorm"
@@ -40,16 +41,18 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 }
 
 func (r *userRepository) Create(user *model.User) error {
+	user.Username = identity.CanonicalUsername(user.Username)
 	return r.db.Create(user).Error
 }
 
 func (r *userRepository) Save(user *model.User) error {
+	user.Username = identity.CanonicalUsername(user.Username)
 	return r.db.Save(user).Error
 }
 
 func (r *userRepository) FindByUsername(username string) (*model.User, error) {
 	var user model.User
-	err := r.db.Where("username = ?", username).First(&user).Error
+	err := r.db.Where("LOWER(BTRIM(username)) = ?", identity.CanonicalUsername(username)).First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil

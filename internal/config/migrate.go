@@ -27,6 +27,10 @@ func MigrateDatabase(db *gorm.DB) error {
 		return fmt.Errorf("auto migrate database: %w", err)
 	}
 
+	if err := enforceCanonicalUsernameUniqueness(db); err != nil {
+		return err
+	}
+
 	result := db.Model(&model.ServerConfig{}).
 		Where("state IS NULL OR state = ''").
 		Update("state", model.ServerConfigStateActive)
@@ -71,5 +75,47 @@ func MigrateDatabase(db *gorm.DB) error {
 		return fmt.Errorf("backfill config sync revisions: %w", err)
 	}
 
+	return nil
+}
+
+// enforceCanonicalUsernameUniqueness makes the database enforce the same
+// account identity rule as the service layer. Historical case-only conflicts
+// are intentionally not merged automatically: their encrypted assets belong
+// to distinct user IDs and require an operator-approved recovery decision.
+func enforceCanonicalUsernameUniqueness(db *gorm.DB) error {
+	var duplicateGroups int64
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM (
+			SELECT LOWER(BTRIM(username)) AS canonical_username
+			FROM users
+			GROUP BY LOWER(BTRIM(username))
+			HAVING COUNT(*) > 1
+		) AS duplicate_usernames
+	`).Scan(&duplicateGroups).Error; err != nil {
+		return fmt.Errorf("audit canonical usernames: %w", err)
+	}
+	if duplicateGroups > 0 {
+		return fmt.Errorf(
+			"refusing username canonicalization: %d duplicate canonical username group(s) require explicit operator recovery before deployment",
+			duplicateGroups,
+		)
+	}
+
+	if err := db.Exec(`
+		UPDATE users
+		SET username = LOWER(BTRIM(username)),
+		    token_version = token_version + 1
+		WHERE username <> LOWER(BTRIM(username))
+	`).Error; err != nil {
+		return fmt.Errorf("normalize stored usernames: %w", err)
+	}
+
+	if err := db.Exec(`
+		CREATE UNIQUE INDEX IF NOT EXISTS uq_users_canonical_username
+		ON users (LOWER(BTRIM(username)))
+	`).Error; err != nil {
+		return fmt.Errorf("create canonical username index: %w", err)
+	}
 	return nil
 }

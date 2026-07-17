@@ -10,7 +10,10 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-var ErrLegacyDeleteProtected = errors.New("asset has migrated to tombstone sync")
+var (
+	ErrLegacyDeleteProtected    = errors.New("asset has migrated to tombstone sync")
+	ErrRotationSnapshotMismatch = errors.New("master key rotation snapshot mismatch")
+)
 
 // ServerConfigRepository 封装配置同步相关数据访问逻辑。
 type ServerConfigRepository interface {
@@ -31,16 +34,41 @@ type ServerConfigRepository interface {
 	DeleteByIDAndUserID(id, userID uint) (bool, error)
 }
 
+// ConfigCipherReplacement is intentionally opaque to the server. A master-key
+// rotation replaces only encrypted bytes after the client has decrypted and
+// re-encrypted them locally.
+type ConfigCipherReplacement struct {
+	ID                  uint
+	ExpectedVectorClock string
+	EncryptedBlob       []byte
+}
+
+// MasterKeyRotationRepository is separate from the regular sync interface so
+// existing sync fakes do not acquire a destructive operation accidentally.
+type MasterKeyRotationRepository interface {
+	RotateEncryptedConfigsAndToken(
+		userID uint,
+		replacements []ConfigCipherReplacement,
+		authorize func(*model.User) error,
+	) (*model.User, error)
+}
+
 type serverConfigRepository struct {
 	db *gorm.DB
 }
 
-func NewServerConfigRepository(db *gorm.DB) ServerConfigRepository {
+// Return the concrete repository so composition roots can opt in to narrowly
+// scoped capabilities such as master-key rotation. Callers still pass it to
+// ServerConfigRepository wherever ordinary sync is required.
+func NewServerConfigRepository(db *gorm.DB) *serverConfigRepository {
 	return &serverConfigRepository{db: db}
 }
 
 func (r *serverConfigRepository) Create(config *model.ServerConfig) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockConfigUser(tx, config.UserID); err != nil {
+			return err
+		}
 		if err := tx.Create(config).Error; err != nil {
 			return err
 		}
@@ -50,6 +78,9 @@ func (r *serverConfigRepository) Create(config *model.ServerConfig) error {
 
 func (r *serverConfigRepository) Update(config *model.ServerConfig) error {
 	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockConfigUser(tx, config.UserID); err != nil {
+			return err
+		}
 		if err := tx.Save(config).Error; err != nil {
 			return err
 		}
@@ -96,6 +127,9 @@ func (r *serverConfigRepository) MutateByAssetID(
 ) (*model.ServerConfig, error) {
 	var result *model.ServerConfig
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockConfigUser(tx, userID); err != nil {
+			return err
+		}
 		var config model.ServerConfig
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("user_id = ? AND asset_id = ?", userID, assetID).
@@ -143,6 +177,11 @@ func appendConfigChange(tx *gorm.DB, config *model.ServerConfig) error {
 	}
 	config.ServerRevision = change.ID
 	return nil
+}
+
+func lockConfigUser(tx *gorm.DB, userID uint) error {
+	var user model.User
+	return tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error
 }
 
 func (r *serverConfigRepository) ListByUserID(userID uint) ([]model.ServerConfig, error) {
@@ -284,6 +323,9 @@ func (r *serverConfigRepository) CountAll() (int64, error) {
 func (r *serverConfigRepository) DeleteByIDAndUserID(id, userID uint) (bool, error) {
 	deleted := false
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockConfigUser(tx, userID); err != nil {
+			return err
+		}
 		var config model.ServerConfig
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
 			Where("id = ? AND user_id = ?", id, userID).First(&config).Error
@@ -303,4 +345,68 @@ func (r *serverConfigRepository) DeleteByIDAndUserID(id, userID uint) (bool, err
 		return nil
 	})
 	return deleted, err
+}
+
+// RotateEncryptedConfigsAndToken atomically locks the account and every
+// rekeyable config. The exact ID/vector-clock set must match, so a concurrent
+// asset update causes a safe conflict instead of a partial re-encryption.
+func (r *serverConfigRepository) RotateEncryptedConfigsAndToken(
+	userID uint,
+	replacements []ConfigCipherReplacement,
+	authorize func(*model.User) error,
+) (*model.User, error) {
+	var result *model.User
+	err := r.db.Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+			return err
+		}
+		if err := authorize(&user); err != nil {
+			return err
+		}
+
+		var configs []model.ServerConfig
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND state <> ?", userID, model.ServerConfigStatePurged).
+			Order("id ASC").Find(&configs).Error; err != nil {
+			return err
+		}
+		if len(configs) != len(replacements) {
+			return ErrRotationSnapshotMismatch
+		}
+
+		byID := make(map[uint]ConfigCipherReplacement, len(replacements))
+		for _, replacement := range replacements {
+			if replacement.ID == 0 || replacement.ExpectedVectorClock == "" || len(replacement.EncryptedBlob) == 0 {
+				return ErrRotationSnapshotMismatch
+			}
+			if _, duplicate := byID[replacement.ID]; duplicate {
+				return ErrRotationSnapshotMismatch
+			}
+			byID[replacement.ID] = replacement
+		}
+
+		for index := range configs {
+			config := &configs[index]
+			replacement, ok := byID[config.ID]
+			if !ok || config.VectorClock != replacement.ExpectedVectorClock {
+				return ErrRotationSnapshotMismatch
+			}
+			config.EncryptedBlob = replacement.EncryptedBlob
+			if err := tx.Save(config).Error; err != nil {
+				return err
+			}
+			if err := appendConfigChange(tx, config); err != nil {
+				return err
+			}
+		}
+
+		user.TokenVersion++
+		if err := tx.Save(&user).Error; err != nil {
+			return err
+		}
+		result = &user
+		return nil
+	})
+	return result, err
 }

@@ -109,6 +109,24 @@ func TestAdminAuthServiceLoginReturnsTokenAndWritesAudit(t *testing.T) {
 	}
 }
 
+func TestAdminAuthServiceLoginCanonicalizesUsername(t *testing.T) {
+	hash, err := utils.HashPasswordArgon2ID("AdminPass123")
+	if err != nil {
+		t.Fatalf("HashPasswordArgon2ID failed: %v", err)
+	}
+	svc := NewAdminAuthService(newFakeUserRepo(&model.User{
+		ID:           1,
+		Username:     "admin@example.com",
+		PasswordHash: hash,
+		Role:         model.UserRoleAdmin,
+		Status:       model.UserStatusNormal,
+	}), newTestJWTManager(), &fakeAdminAuditService{})
+
+	if _, err := svc.Login("  ADMIN@EXAMPLE.COM ", "AdminPass123", AdminRequestMeta{}); err != nil {
+		t.Fatalf("canonical admin login failed: %v", err)
+	}
+}
+
 func newTestJWTManager() *utils.JWTManager {
 	return utils.NewJWTManager("test-secret", "orbitterm-test", 15, 30, 24)
 }

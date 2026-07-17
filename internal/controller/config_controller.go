@@ -16,11 +16,22 @@ import (
 
 // ConfigController 负责处理云同步接口。
 type ConfigController struct {
-	configService service.ConfigService
+	configService            service.ConfigService
+	masterKeyRotationService service.MasterKeyRotationService
 }
 
-func NewConfigController(configService service.ConfigService) *ConfigController {
-	return &ConfigController{configService: configService}
+func NewConfigController(
+	configService service.ConfigService,
+	rotationServices ...service.MasterKeyRotationService,
+) *ConfigController {
+	var rotationService service.MasterKeyRotationService
+	if len(rotationServices) > 0 {
+		rotationService = rotationServices[0]
+	}
+	return &ConfigController{
+		configService:            configService,
+		masterKeyRotationService: rotationService,
+	}
 }
 
 // uploadConfigRequest 上传配置请求体。
@@ -31,6 +42,17 @@ type uploadConfigRequest struct {
 	IdentityFingerprint string `json:"identity_fingerprint,omitempty"`
 	EncryptedBlobBase64 string `json:"encrypted_blob_base64" binding:"required"`
 	VectorClock         string `json:"vector_clock" binding:"required"`
+}
+
+type masterKeyRotationItemRequest struct {
+	ID                  uint   `json:"id" binding:"required"`
+	ExpectedVectorClock string `json:"expected_vector_clock" binding:"required"`
+	EncryptedBlobBase64 string `json:"encrypted_blob_base64" binding:"required"`
+}
+
+type masterKeyRotationRequest struct {
+	CurrentLoginPassword string                         `json:"current_login_password" binding:"required"`
+	Items                []masterKeyRotationItemRequest `json:"items"`
 }
 
 // Upload godoc
@@ -90,6 +112,67 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 	}
 
 	common.Success(ctx, status, toConfigResponse(result))
+}
+
+// RotateMasterKey atomically accepts a complete, client-side re-encrypted
+// ciphertext snapshot. It deliberately cannot decrypt the payload.
+func (c *ConfigController) RotateMasterKey(ctx *gin.Context) {
+	userID, ok := extractUserID(ctx)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	if c.masterKeyRotationService == nil {
+		common.Error(ctx, http.StatusNotImplemented, "当前服务暂不支持主密码轮换")
+		return
+	}
+
+	var req masterKeyRotationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	items := make([]service.MasterKeyRotationItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		blob, err := base64.StdEncoding.DecodeString(item.EncryptedBlobBase64)
+		if err != nil {
+			common.Error(ctx, http.StatusBadRequest, "encrypted_blob_base64 不是合法的 Base64")
+			return
+		}
+		items = append(items, service.MasterKeyRotationItem{
+			ID:                  item.ID,
+			ExpectedVectorClock: item.ExpectedVectorClock,
+			EncryptedBlob:       blob,
+		})
+	}
+
+	pair, err := c.masterKeyRotationService.Rotate(userID, req.CurrentLoginPassword, items)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMasterKeyRotationInvalidInput):
+			common.Error(ctx, http.StatusBadRequest, "主密码轮换参数不合法")
+		case errors.Is(err, service.ErrMasterKeyRotationConflict):
+			common.Error(ctx, http.StatusConflict, "资产在轮换期间发生变化，请重新同步后重试")
+		case errors.Is(err, service.ErrInvalidCredential):
+			common.Error(ctx, http.StatusUnauthorized, "登录密码错误")
+		case errors.Is(err, service.ErrAccountBanned):
+			common.Error(ctx, http.StatusForbidden, "账号已被封禁，请联系管理员")
+		case errors.Is(err, service.ErrAccountDeleted):
+			common.Error(ctx, http.StatusForbidden, "账号已注销")
+		default:
+			common.Error(ctx, http.StatusInternalServerError, "主密码轮换失败")
+		}
+		return
+	}
+
+	common.Success(ctx, http.StatusOK, gin.H{
+		"access_token":               pair.AccessToken,
+		"refresh_token":              pair.RefreshToken,
+		"token":                      pair.AccessToken,
+		"type":                       "Bearer",
+		"expires_in_seconds":         pair.AccessExpiresInSeconds,
+		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+	})
 }
 
 // Pull godoc

@@ -43,6 +43,11 @@ type refreshRequest struct {
 	RefreshToken string `json:"refresh_token" binding:"required"`
 }
 
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password" binding:"required"`
+	NewPassword     string `json:"new_password" binding:"required"`
+}
+
 // Register godoc
 // @Summary 用户注册
 // @Description 创建新用户，密码将使用 Argon2id 算法进行哈希。
@@ -192,6 +197,52 @@ func (c *AuthController) Refresh(ctx *gin.Context) {
 	common.Success(ctx, http.StatusOK, gin.H{
 		"access_token":               pair.AccessToken,
 		"refresh_token":              pair.RefreshToken,
+		"type":                       "Bearer",
+		"expires_in_seconds":         pair.AccessExpiresInSeconds,
+		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+	})
+}
+
+// ChangePassword verifies the current login password and invalidates every
+// existing token before returning a replacement pair for this device.
+func (c *AuthController) ChangePassword(ctx *gin.Context) {
+	userID, ok := extractUserID(ctx)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+
+	var req changePasswordRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+
+	pair, err := c.authService.ChangePassword(userID, req.CurrentPassword, req.NewPassword)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidInput):
+			common.Error(ctx, http.StatusBadRequest, "当前密码和新密码不能为空")
+		case errors.Is(err, service.ErrWeakPassword):
+			common.Error(ctx, http.StatusBadRequest, "密码至少 12 位，并包含大写字母、小写字母、数字和特殊字符")
+		case errors.Is(err, service.ErrPasswordUnchanged):
+			common.Error(ctx, http.StatusBadRequest, "新密码不能与当前密码相同")
+		case errors.Is(err, service.ErrInvalidCredential):
+			common.Error(ctx, http.StatusUnauthorized, "当前密码错误")
+		case errors.Is(err, service.ErrAccountBanned):
+			common.Error(ctx, http.StatusForbidden, "账号已被封禁，请联系管理员")
+		case errors.Is(err, service.ErrAccountDeleted):
+			common.Error(ctx, http.StatusForbidden, "账号已注销")
+		default:
+			common.Error(ctx, http.StatusInternalServerError, "修改登录密码失败")
+		}
+		return
+	}
+
+	common.Success(ctx, http.StatusOK, gin.H{
+		"access_token":               pair.AccessToken,
+		"refresh_token":              pair.RefreshToken,
+		"token":                      pair.AccessToken,
 		"type":                       "Bearer",
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,

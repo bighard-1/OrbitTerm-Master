@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
@@ -376,7 +377,7 @@ func (s *adminUserService) CreateManagedUser(adminID uint, username, password, r
 	if adminID == 0 || len(password) < 8 {
 		return nil, ErrInvalidInput
 	}
-	username = strings.TrimSpace(username)
+	username = identity.CanonicalUsername(username)
 	role = strings.TrimSpace(role)
 	reason = strings.TrimSpace(reason)
 	if username == "" || !validManagedRole(role) {

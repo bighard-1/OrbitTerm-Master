@@ -3,9 +3,9 @@ package service
 import (
 	"errors"
 	"strconv"
-	"strings"
 	"time"
 
+	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
@@ -63,7 +63,7 @@ func (s *adminAuthService) BootstrapStatus() (*AdminBootstrapStatus, error) {
 }
 
 func (s *adminAuthService) BootstrapSuperAdmin(username, password string, meta AdminRequestMeta) (*model.User, error) {
-	username = strings.TrimSpace(username)
+	username = identity.CanonicalUsername(username)
 	if len(username) < 3 || len(password) < adminPasswordMinLength {
 		return nil, ErrInvalidInput
 	}
@@ -113,7 +113,7 @@ func (s *adminAuthService) BootstrapSuperAdmin(username, password string, meta A
 }
 
 func (s *adminAuthService) Login(username, password string, meta AdminRequestMeta) (*utils.TokenPair, error) {
-	username = strings.TrimSpace(username)
+	username = identity.CanonicalUsername(username)
 	if username == "" || password == "" {
 		return nil, ErrInvalidInput
 	}
