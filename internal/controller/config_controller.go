@@ -1,6 +1,7 @@
 package controller
 
 import (
+	"crypto/sha256"
 	"encoding/base64"
 	"errors"
 	"net/http"
@@ -16,21 +17,20 @@ import (
 
 // ConfigController 负责处理云同步接口。
 type ConfigController struct {
-	configService            service.ConfigService
-	masterKeyRotationService service.MasterKeyRotationService
+	configService                service.ConfigService
+	masterKeyRotationService     service.MasterKeyRotationService
+	configCipherMigrationService service.ConfigCipherMigrationService
 }
 
 func NewConfigController(
 	configService service.ConfigService,
-	rotationServices ...service.MasterKeyRotationService,
+	rotationService service.MasterKeyRotationService,
+	migrationService service.ConfigCipherMigrationService,
 ) *ConfigController {
-	var rotationService service.MasterKeyRotationService
-	if len(rotationServices) > 0 {
-		rotationService = rotationServices[0]
-	}
 	return &ConfigController{
-		configService:            configService,
-		masterKeyRotationService: rotationService,
+		configService:                configService,
+		masterKeyRotationService:     rotationService,
+		configCipherMigrationService: migrationService,
 	}
 }
 
@@ -53,6 +53,18 @@ type masterKeyRotationItemRequest struct {
 type masterKeyRotationRequest struct {
 	CurrentLoginPassword string                         `json:"current_login_password" binding:"required"`
 	Items                []masterKeyRotationItemRequest `json:"items"`
+}
+
+type configCipherMigrationItemRequest struct {
+	ID                  uint   `json:"id" binding:"required"`
+	ExpectedVectorClock string `json:"expected_vector_clock" binding:"required"`
+	ExpectedBlobSHA256  string `json:"expected_blob_sha256" binding:"required"`
+	EncryptedBlobBase64 string `json:"encrypted_blob_base64" binding:"required"`
+	NextVectorClock     string `json:"next_vector_clock" binding:"required"`
+}
+
+type configCipherMigrationRequest struct {
+	Items []configCipherMigrationItemRequest `json:"items" binding:"required"`
 }
 
 // Upload godoc
@@ -173,6 +185,67 @@ func (c *ConfigController) RotateMasterKey(ctx *gin.Context) {
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
 	})
+}
+
+// MigrateConfigCryptoV2 atomically replaces an exact V1 ciphertext snapshot
+// with client-produced OTC2 ciphertext. It accepts no passwords or plaintext.
+func (c *ConfigController) MigrateConfigCryptoV2(ctx *gin.Context) {
+	userID, ok := extractUserID(ctx)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	if c.configCipherMigrationService == nil {
+		common.Error(ctx, http.StatusNotImplemented, "当前服务暂不支持加密格式迁移")
+		return
+	}
+	var req configCipherMigrationRequest
+	if err := ctx.ShouldBindJSON(&req); err != nil || len(req.Items) == 0 {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	items := make([]service.ConfigCipherMigrationItem, 0, len(req.Items))
+	for _, item := range req.Items {
+		blob, err := base64.StdEncoding.DecodeString(item.EncryptedBlobBase64)
+		if err != nil {
+			common.Error(ctx, http.StatusBadRequest, "encrypted_blob_base64 不是合法的 Base64")
+			return
+		}
+		digest, err := decodeSHA256(item.ExpectedBlobSHA256)
+		if err != nil {
+			common.Error(ctx, http.StatusBadRequest, "expected_blob_sha256 不是合法的 SHA-256")
+			return
+		}
+		items = append(items, service.ConfigCipherMigrationItem{
+			ID:                  item.ID,
+			ExpectedVectorClock: item.ExpectedVectorClock,
+			ExpectedBlobSHA256:  digest,
+			EncryptedBlob:       blob,
+			NextVectorClock:     item.NextVectorClock,
+		})
+	}
+	if err := c.configCipherMigrationService.MigrateToV2(userID, items); err != nil {
+		switch {
+		case errors.Is(err, service.ErrConfigCipherMigrationInvalidInput):
+			common.Error(ctx, http.StatusBadRequest, "加密格式迁移参数不合法")
+		case errors.Is(err, service.ErrConfigCipherMigrationConflict):
+			common.Error(ctx, http.StatusConflict, "配置在迁移期间发生变化，请重新同步后重试")
+		default:
+			common.Error(ctx, http.StatusInternalServerError, "加密格式迁移失败")
+		}
+		return
+	}
+	common.Success(ctx, http.StatusOK, gin.H{"migrated_count": len(items)})
+}
+
+func decodeSHA256(value string) ([sha256.Size]byte, error) {
+	var digest [sha256.Size]byte
+	decoded, err := base64.StdEncoding.DecodeString(value)
+	if err != nil || len(decoded) != sha256.Size {
+		return digest, errors.New("invalid sha256")
+	}
+	copy(digest[:], decoded)
+	return digest, nil
 }
 
 // Pull godoc

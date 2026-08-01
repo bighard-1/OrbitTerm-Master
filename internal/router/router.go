@@ -22,6 +22,7 @@ func Register(
 	healthController *controller.HealthController,
 	jwtManager *utils.JWTManager,
 	userRepo repository.UserRepository,
+	configCipherV2MigrationEnabled bool,
 ) {
 	adminweb.Register(engine)
 	engine.GET("/healthz", healthController.Health)
@@ -43,6 +44,9 @@ func Register(
 		{
 			configGroup.POST("/upload", configController.Upload)
 			configGroup.POST("/master-key/rotate", middleware.IPRateLimit(5, time.Hour), configController.RotateMasterKey)
+			if configCipherV2MigrationEnabled {
+				configGroup.POST("/crypto/migrate-v2", middleware.IPRateLimit(5, time.Hour), configController.MigrateConfigCryptoV2)
+			}
 			configGroup.GET("/pull", configController.Pull)
 			configGroup.GET("/trash", configController.Trash)
 			configGroup.GET("/sync/pull", configController.PullChanges)

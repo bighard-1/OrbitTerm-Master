@@ -40,6 +40,9 @@ services:
       ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
       ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"
       ASSET_TRASH_CLEANUP_INTERVAL_MINUTES: "60"
+      # Keep V2 encryption migration unavailable until a staged rollout has
+      # verified the endpoint, cross-device reads, and rollback plan.
+      CONFIG_CIPHER_V2_MIGRATION_ENABLED: "false"
       # 生产默认避免常规 SQL 进入容器日志；日志参数始终使用占位符脱敏。
       DB_LOG_LEVEL: "warn"
       # 按实际反向代理容器 IP/CIDR 调整；不使用代理可设为空字符串。

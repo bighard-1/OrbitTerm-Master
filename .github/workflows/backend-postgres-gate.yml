@@ -1,0 +1,71 @@
+name: Backend PostgreSQL Gate
+
+on:
+  pull_request:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - ".github/workflows/backend-postgres-gate.yml"
+  push:
+    paths:
+      - "**.go"
+      - "go.mod"
+      - "go.sum"
+      - "Dockerfile"
+      - ".github/workflows/backend-postgres-gate.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-transaction-gate:
+    name: PostgreSQL transaction and repository gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16.8-alpine
+        env:
+          POSTGRES_USER: orbitterm_test
+          POSTGRES_PASSWORD: orbitterm_test
+          POSTGRES_DB: orbitterm_test
+        options: >-
+          --health-cmd "pg_isready -U orbitterm_test -d orbitterm_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+        ports:
+          - 5432:5432
+    env:
+      ORBITTERM_TEST_DATABASE_URL: host=127.0.0.1 user=orbitterm_test password=orbitterm_test dbname=orbitterm_test port=5432 sslmode=disable TimeZone=UTC
+      CGO_ENABLED: "0"
+    steps:
+      - name: Check out immutable revision
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up the declared Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Run all backend tests against isolated PostgreSQL
+        run: go test ./... -count=1
+
+      # Keep this explicit even though the full suite above includes it: a
+      # future package/test-selection change must not silently remove the
+      # all-or-nothing V2 ciphertext migration proof from the release gate.
+      - name: Prove V2 ciphertext migration transaction semantics
+        run: >-
+          go test ./internal/service
+          -run '^TestPostgresConfigCipherMigration'
+          -count=1
+          -v

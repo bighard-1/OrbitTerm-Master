@@ -57,3 +57,13 @@ func TestEmptyTrustedProxiesDisablesProxyTrust(t *testing.T) {
 		t.Fatalf("expected no trusted proxies, got %#v", got)
 	}
 }
+
+func TestConfigCipherV2MigrationIsDisabledUnlessExplicitlyEnabled(t *testing.T) {
+	if Load().ConfigCipherV2MigrationEnabled {
+		t.Fatal("V2 cipher migration must remain disabled by default")
+	}
+	t.Setenv("CONFIG_CIPHER_V2_MIGRATION_ENABLED", "true")
+	if !Load().ConfigCipherV2MigrationEnabled {
+		t.Fatal("explicit V2 cipher migration enablement was ignored")
+	}
+}

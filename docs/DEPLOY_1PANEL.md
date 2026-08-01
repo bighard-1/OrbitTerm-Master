@@ -83,6 +83,8 @@ services:
       ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
       ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"
       ASSET_TRASH_CLEANUP_INTERVAL_MINUTES: "60"
+      # 默认关闭。仅在预发布验证或经批准的生产灰度时设置为 true。
+      CONFIG_CIPHER_V2_MIGRATION_ENABLED: "false"
     ports:
       - "127.0.0.1:8080:8080"
 
@@ -150,12 +152,17 @@ volumes:
    - 说明：后台检查最近删除到期记录的间隔，最低有效值为 5 分钟；更低的值会回退为 60 分钟。
    - 注意：实际自动清理开关及保留周期由管理端“系统策略”动态控制，修改后无需重启容器。
 
-12. `DB_LOG_LEVEL`
+12. `CONFIG_CIPHER_V2_MIGRATION_ENABLED`
+   - 示例：`false`
+   - 说明：控制 `POST /api/v1/config/crypto/migrate-v2` 是否注册。默认必须保持 `false`；V2-aware 客户端仅在端点可达时才会发起其受控迁移尝试。
+   - 灰度方式：先在隔离预发布环境设为 `true` 并完成跨设备验证；生产启用前确认备份、固定镜像摘要、已发布 V2 reader 客户端和回滚镜像。关闭后该端点返回 `404`，不会影响既有 V1/V2 的读写同步。
+
+13. `DB_LOG_LEVEL`
    - 示例：`warn`
    - 说明：数据库日志级别，可选 `silent`、`error`、`warn`、`info`。
    - 安全建议：日志参数始终使用占位符脱敏；生产仍应保持 `warn`，`info` 只用于临时排障，避免泄露数据库结构并降低日志与 I/O 压力。
 
-13. `TRUSTED_PROXIES`
+14. `TRUSTED_PROXIES`
    - 示例：`127.0.0.1,::1,172.18.0.0/16`
    - 说明：允许 Gin 信任并解析转发请求头的代理 IP 或 CIDR，多个值以英文逗号分隔。
    - 安全建议：在 1Panel 中查询实际反向代理容器网段并精确填写，禁止使用 `0.0.0.0/0`；未使用反向代理时设置为空字符串。

@@ -28,8 +28,12 @@ type Config struct {
 	AdminAutoUnbanIntervalMinutes    int
 	AdminAutoUnbanBatchLimit         int
 	AssetTrashCleanupIntervalMinutes int
-	DatabaseLogLevel                 string
-	TrustedProxies                   []string
+	// ConfigCipherV2MigrationEnabled is deliberately opt-in. Clients that know
+	// how to read V2 may otherwise begin their controlled migration as soon as
+	// the route is deployed, which is too broad for a production rollout.
+	ConfigCipherV2MigrationEnabled bool
+	DatabaseLogLevel               string
+	TrustedProxies                 []string
 }
 
 // Load 从环境变量读取配置并设置默认值。
@@ -48,6 +52,7 @@ func Load() Config {
 		AdminAutoUnbanIntervalMinutes:    getEnvAsInt("ADMIN_AUTO_UNBAN_INTERVAL_MINUTES", 10),
 		AdminAutoUnbanBatchLimit:         getEnvAsInt("ADMIN_AUTO_UNBAN_BATCH_LIMIT", 100),
 		AssetTrashCleanupIntervalMinutes: getEnvAsInt("ASSET_TRASH_CLEANUP_INTERVAL_MINUTES", 60),
+		ConfigCipherV2MigrationEnabled:   getEnvAsBool("CONFIG_CIPHER_V2_MIGRATION_ENABLED", false),
 		DatabaseLogLevel:                 getEnv("DB_LOG_LEVEL", "warn"),
 		TrustedProxies:                   getEnvAsCSV("TRUSTED_PROXIES", []string{"127.0.0.1", "::1"}),
 	}

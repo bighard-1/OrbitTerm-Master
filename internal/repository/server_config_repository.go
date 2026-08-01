@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"time"
 
@@ -11,8 +13,9 @@ import (
 )
 
 var (
-	ErrLegacyDeleteProtected    = errors.New("asset has migrated to tombstone sync")
-	ErrRotationSnapshotMismatch = errors.New("master key rotation snapshot mismatch")
+	ErrLegacyDeleteProtected           = errors.New("asset has migrated to tombstone sync")
+	ErrRotationSnapshotMismatch        = errors.New("master key rotation snapshot mismatch")
+	ErrCipherMigrationSnapshotMismatch = errors.New("config cipher migration snapshot mismatch")
 )
 
 // ServerConfigRepository 封装配置同步相关数据访问逻辑。
@@ -51,6 +54,23 @@ type MasterKeyRotationRepository interface {
 		replacements []ConfigCipherReplacement,
 		authorize func(*model.User) error,
 	) (*model.User, error)
+}
+
+// ConfigCipherMigrationReplacement preserves the exact snapshot that the
+// client decrypted locally. The server only compares opaque ciphertext and
+// writes replacement ciphertext; it never receives plaintext or a password.
+type ConfigCipherMigrationReplacement struct {
+	ID                  uint
+	ExpectedVectorClock string
+	ExpectedBlobSHA256  [32]byte
+	EncryptedBlob       []byte
+	NextVectorClock     string
+}
+
+// ConfigCipherMigrationRepository is deliberately separate from ordinary
+// synchronization so callers must opt in to the all-or-nothing migration.
+type ConfigCipherMigrationRepository interface {
+	MigrateEncryptedConfigsToV2(userID uint, replacements []ConfigCipherMigrationReplacement) error
 }
 
 type serverConfigRepository struct {
@@ -409,4 +429,65 @@ func (r *serverConfigRepository) RotateEncryptedConfigsAndToken(
 		return nil
 	})
 	return result, err
+}
+
+// MigrateEncryptedConfigsToV2 atomically replaces one exact active snapshot.
+// Any stale, missing, duplicate, or changed record aborts the whole transaction
+// before a single ciphertext is written.
+func (r *serverConfigRepository) MigrateEncryptedConfigsToV2(
+	userID uint,
+	replacements []ConfigCipherMigrationReplacement,
+) error {
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockConfigUser(tx, userID); err != nil {
+			return err
+		}
+		if len(replacements) == 0 {
+			return ErrCipherMigrationSnapshotMismatch
+		}
+
+		byID := make(map[uint]ConfigCipherMigrationReplacement, len(replacements))
+		for _, replacement := range replacements {
+			if replacement.ID == 0 || replacement.ExpectedVectorClock == "" ||
+				len(replacement.EncryptedBlob) == 0 || replacement.NextVectorClock == "" {
+				return ErrCipherMigrationSnapshotMismatch
+			}
+			if _, duplicate := byID[replacement.ID]; duplicate {
+				return ErrCipherMigrationSnapshotMismatch
+			}
+			byID[replacement.ID] = replacement
+		}
+
+		var configs []model.ServerConfig
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("user_id = ? AND state <> ?", userID, model.ServerConfigStatePurged).
+			Order("id ASC").Find(&configs).Error; err != nil {
+			return err
+		}
+		if len(configs) != len(replacements) {
+			return ErrCipherMigrationSnapshotMismatch
+		}
+		for index := range configs {
+			config := &configs[index]
+			replacement := byID[config.ID]
+			actualDigest := sha256.Sum256(config.EncryptedBlob)
+			if config.VectorClock != replacement.ExpectedVectorClock ||
+				!bytes.Equal(actualDigest[:], replacement.ExpectedBlobSHA256[:]) {
+				return ErrCipherMigrationSnapshotMismatch
+			}
+		}
+		for index := range configs {
+			config := &configs[index]
+			replacement := byID[config.ID]
+			config.EncryptedBlob = replacement.EncryptedBlob
+			config.VectorClock = replacement.NextVectorClock
+			if err := tx.Save(config).Error; err != nil {
+				return err
+			}
+			if err := appendConfigChange(tx, config); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }

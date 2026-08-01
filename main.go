@@ -68,7 +68,8 @@ func main() {
 	assetDeletionPolicyManager := service.NewAssetDeletionPolicyManager(systemSettingRepo, configRepo, adminAuditService)
 	configService := service.NewConfigService(configRepo, assetDeletionPolicyService)
 	masterKeyRotationService := service.NewMasterKeyRotationService(configRepo, jwtManager)
-	configController := controller.NewConfigController(configService, masterKeyRotationService)
+	configCipherMigrationService := service.NewConfigCipherMigrationService(configRepo)
+	configController := controller.NewConfigController(configService, masterKeyRotationService, configCipherMigrationService)
 	adminDashboardService := service.NewAdminDashboardService(userRepo, configRepo, adminAuditService, backupReadinessService)
 	systemHealthService := service.NewSystemHealthService(db, cfg, startedAt)
 	healthController := controller.NewHealthController(systemHealthService)
@@ -97,7 +98,16 @@ func main() {
 	if err := engine.SetTrustedProxies(cfg.TrustedProxies); err != nil {
 		log.Fatalf("可信代理配置无效: %v", err)
 	}
-	router.Register(engine, authController, configController, adminController, healthController, jwtManager, userRepo)
+	router.Register(
+		engine,
+		authController,
+		configController,
+		adminController,
+		healthController,
+		jwtManager,
+		userRepo,
+		cfg.ConfigCipherV2MigrationEnabled,
+	)
 	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
 	worker.StartAssetTrashCleanupWorker(context.Background(), cfg, assetDeletionPolicyManager)
 
