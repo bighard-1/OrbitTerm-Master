@@ -217,6 +217,15 @@ OrbitTerm 后端采用零知识同步模型：
 2. 重建 `orbit-api`。
 3. 再次验证核心接口。
 
+**资产 UUID 规范化迁移例外：**上述单独回退镜像的步骤不适用于
+[`ASSET_DELETION_SYNC.md`](ASSET_DELETION_SYNC.md) 所述的大小写兼容升级。
+先完成数据库备份、归档可读性校验和
+[`sql/asset_id_canonical_preflight.sql`](sql/asset_id_canonical_preflight.sql)
+只读审计，并在切换时摘流、停止全部旧 API 实例。数据库已规范化且新实例接收过
+写入后，不得仅把镜像回退到旧的大小写敏感实现；优先修复并继续使用兼容版本。
+若必须恢复升级前的数据库与镜像，应在停止写入后按经过演练的数据库恢复流程一同
+处理，并先评估切换后写入可能丢失的影响，不能把它当作无损快速回滚。
+
 ## 8. 自检清单
 
 1. `orbit-db` healthy。

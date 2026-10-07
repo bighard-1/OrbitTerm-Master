@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"strings"
 	"time"
 
 	"orbitterm-server/internal/model"
@@ -122,7 +123,7 @@ func (r *serverConfigRepository) FindByIDAndUserID(id, userID uint) (*model.Serv
 
 func (r *serverConfigRepository) FindByAssetIDAndUserID(assetID string, userID uint) (*model.ServerConfig, error) {
 	var config model.ServerConfig
-	err := r.db.Where("asset_id = ? AND user_id = ?", assetID, userID).First(&config).Error
+	err := r.db.Where("LOWER(asset_id) = ? AND user_id = ?", strings.ToLower(strings.TrimSpace(assetID)), userID).First(&config).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, nil
 	}
@@ -146,13 +147,14 @@ func (r *serverConfigRepository) MutateByAssetID(
 	mutate func(*model.ServerConfig) (bool, error),
 ) (*model.ServerConfig, error) {
 	var result *model.ServerConfig
+	canonicalAssetID := strings.ToLower(strings.TrimSpace(assetID))
 	err := r.db.Transaction(func(tx *gorm.DB) error {
 		if err := lockConfigUser(tx, userID); err != nil {
 			return err
 		}
 		var config model.ServerConfig
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("user_id = ? AND asset_id = ?", userID, assetID).
+			Where("user_id = ? AND LOWER(asset_id) = ?", userID, canonicalAssetID).
 			First(&config).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil

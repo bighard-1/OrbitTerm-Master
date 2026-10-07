@@ -18,6 +18,45 @@
 4. 删除、恢复和永久删除必须携带唯一 Operation ID，并支持幂等重试。
 5. 服务端不得记录资产名称、主机地址、凭据、主密码或解密后的身份指纹。
 6. 历史配置的 AssetID 只能由已解锁客户端解密后回填，服务端不得尝试推导。
+7. `AssetID` 的 UUID 文本形式统一为小写；旧客户端发送的大写形式必须映射到同一资产和同一墓碑。
+
+## UUID 大小写兼容升级预检
+
+在部署规范化迁移前先完成 PostgreSQL 可恢复备份，并对目标库执行只读审计：
+
+```sql
+SELECT user_id,
+       LOWER(BTRIM(asset_id)) AS canonical_asset_id,
+       ARRAY_AGG(id ORDER BY id) AS config_ids,
+       ARRAY_AGG(state ORDER BY id) AS states
+FROM server_configs
+WHERE BTRIM(asset_id) <> ''
+GROUP BY user_id, LOWER(BTRIM(asset_id))
+HAVING COUNT(*) > 1;
+```
+
+结果必须为空。迁移会在表锁下再次审计、将已有非空 AssetID 规范化为小写，
+并建立大小写无关的唯一索引；密文、资产状态和同步修订号不因大小写迁移而改变。
+可用仓库内的 [`sql/asset_id_canonical_preflight.sql`](sql/asset_id_canonical_preflight.sql)
+在目标 PostgreSQL 中执行同一规则的只读预检。输出仅包含冲突组数、受影响行数和
+需要规范化的行数；`canonical_collision_groups` 必须为 `0`。预检不能代替备份，
+也不能代替迁移时持锁的二次审计。执行前须核对连接确实指向目标数据库，且备份的
+校验和及 `pg_restore --list` 均已通过；不要把数据库口令写入终端命令或回执。
+若实际容器名、库名和用户确为部署指南中的示例值，可在持有该 SQL 文件的主机上执行：
+
+```bash
+docker exec -i orbit-db psql -X -v ON_ERROR_STOP=1 -U orbitterm -d orbitterm \
+  < docs/sql/asset_id_canonical_preflight.sql
+```
+
+容器、数据库或用户不同则先核对并替换；命令必须返回成功，且冲突组数为零。
+若发现重复组，迁移安全停止，不自动删除或合并任何密文记录。应保持旧版本服务，
+在维护窗口对照受控客户端的活动列表、最近删除与向量钟审查冲突，完成经确认的
+恢复方案后重跑审计。不得仅按数据库 ID 或更新时间选择胜者，否则可能使已删除
+资产重新出现。服务端版本应先于依赖小写 wire 格式的新客户端发布。
+切换服务端版本时，应先摘流并停止全部旧实例，再启动含此迁移的新实例；不要让
+旧的大小写敏感服务端在数据库规范化后继续接收请求。新服务端健康且删除/恢复
+冒烟测试通过后，再恢复流量并发布客户端。
 
 ## 兼容发布顺序
 

@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -242,6 +243,60 @@ func TestConfigServiceRejectsUploadOverTombstone(t *testing.T) {
 	}
 }
 
+func TestConfigServiceCanonicalizesNewAssetID(t *testing.T) {
+	const appleAssetID = "ABCDEF00-1234-4678-9ABC-DEF012345678"
+	repo := newFakeConfigRepo()
+	svc := NewConfigService(repo)
+	created, err := svc.Upload(3, nil, appleAssetID, "", []byte("cipher"), `{"mac":1}`)
+	if err != nil {
+		t.Fatalf("upload upper-case Apple asset: %v", err)
+	}
+	if created.AssetID != strings.ToLower(appleAssetID) {
+		t.Fatalf("new asset ID was not canonicalized: %q", created.AssetID)
+	}
+}
+
+func TestConfigServiceAcceptsMixedCaseLegacyAssetLifecycle(t *testing.T) {
+	const appleAssetID = "ABCDEF00-1234-4678-9ABC-DEF012345678"
+	androidAssetID := strings.ToLower(appleAssetID)
+	repo := newFakeConfigRepo(&model.ServerConfig{
+		ID: 7, UserID: 3, AssetID: appleAssetID, EncryptedBlob: []byte("cipher"),
+		VectorClock: `{"mac":1}`, State: model.ServerConfigStateActive,
+	})
+	svc := NewConfigService(repo)
+	updated, err := svc.Upload(3, nil, androidAssetID, "", []byte("updated"), `{"mac":2}`)
+	if err != nil || updated.ID != 7 || len(repo.items) != 1 {
+		t.Fatalf("mixed-case upload must update the existing asset: result=%+v err=%v", updated, err)
+	}
+	deleted, err := svc.DeleteAsset(3, AssetMutationInput{
+		AssetID: androidAssetID, DeviceID: testDeviceID, OperationID: testDeleteOp, VectorClock: `{"mac":3}`,
+	})
+	if err != nil || deleted.State != model.ServerConfigStateDeleted {
+		t.Fatalf("mixed-case delete failed: result=%+v err=%v", deleted, err)
+	}
+	if _, err := svc.Upload(3, nil, androidAssetID, "", []byte("stale"), `{"mac":4}`); !errors.Is(err, ErrConfigInvalidState) {
+		t.Fatalf("stale upload must not resurrect deleted asset: %v", err)
+	}
+	restored, err := svc.RestoreAsset(3, AssetMutationInput{
+		AssetID: appleAssetID, DeviceID: testDeviceID, OperationID: testRestoreOp, VectorClock: `{"mac":4}`,
+	})
+	if err != nil || restored.State != model.ServerConfigStateActive {
+		t.Fatalf("mixed-case restore failed: result=%+v err=%v", restored, err)
+	}
+	_, err = svc.DeleteAsset(3, AssetMutationInput{
+		AssetID: appleAssetID, DeviceID: testDeviceID, OperationID: "55555555-5555-4555-8555-555555555555", VectorClock: `{"mac":5}`,
+	})
+	if err != nil {
+		t.Fatalf("second mixed-case delete: %v", err)
+	}
+	purged, err := svc.PurgeAsset(3, AssetMutationInput{
+		AssetID: androidAssetID, DeviceID: testDeviceID, OperationID: testPurgeOp, VectorClock: `{"mac":6}`,
+	})
+	if err != nil || purged.State != model.ServerConfigStatePurged || len(purged.EncryptedBlob) != 0 {
+		t.Fatalf("mixed-case purge failed: result=%+v err=%v", purged, err)
+	}
+}
+
 func TestConfigServiceBackfillsAssetIDWithoutRecreatingLegacyRecord(t *testing.T) {
 	legacy := &model.ServerConfig{
 		ID: 17, UserID: 3, EncryptedBlob: []byte("old-cipher"),
@@ -336,12 +391,13 @@ func (f *fakeConfigRepo) FindByIDAndUserID(id, userID uint) (*model.ServerConfig
 	return nil, nil
 }
 func (f *fakeConfigRepo) FindByAssetIDAndUserID(assetID string, userID uint) (*model.ServerConfig, error) {
-	item := f.items[assetID]
-	if item == nil || item.UserID != userID {
-		return nil, nil
+	for _, item := range f.items {
+		if item.UserID == userID && strings.EqualFold(item.AssetID, assetID) {
+			copy := *item
+			return &copy, nil
+		}
 	}
-	copy := *item
-	return &copy, nil
+	return nil, nil
 }
 func (f *fakeConfigRepo) ListByIdentityFingerprint(userID uint, fingerprint string) ([]model.ServerConfig, error) {
 	items := make([]model.ServerConfig, 0)
@@ -353,8 +409,14 @@ func (f *fakeConfigRepo) ListByIdentityFingerprint(userID uint, fingerprint stri
 	return items, nil
 }
 func (f *fakeConfigRepo) MutateByAssetID(userID uint, assetID string, mutate func(*model.ServerConfig) (bool, error)) (*model.ServerConfig, error) {
-	item := f.items[assetID]
-	if item == nil || item.UserID != userID {
+	var item *model.ServerConfig
+	for _, candidate := range f.items {
+		if candidate.UserID == userID && strings.EqualFold(candidate.AssetID, assetID) {
+			item = candidate
+			break
+		}
+	}
+	if item == nil {
 		return nil, nil
 	}
 	copy := *item
@@ -368,7 +430,7 @@ func (f *fakeConfigRepo) MutateByAssetID(userID uint, assetID string, mutate fun
 		copy.ServerRevision = f.nextRevision
 		f.nextRevision++
 		stored := copy
-		f.items[assetID] = &stored
+		f.items[item.AssetID] = &stored
 	}
 	return &copy, nil
 }

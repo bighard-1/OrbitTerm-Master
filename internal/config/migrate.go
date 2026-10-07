@@ -47,6 +47,9 @@ func MigrateDatabase(db *gorm.DB) error {
 	`).Error; err != nil {
 		return fmt.Errorf("create server config asset identity index: %w", err)
 	}
+	if err := enforceCanonicalAssetIDUniqueness(db); err != nil {
+		return err
+	}
 
 	// 为升级前的配置建立初始修订记录，使新版客户端第一次 cursor=0 时能够完整拉取。
 	if err := db.Transaction(func(tx *gorm.DB) error {
@@ -76,6 +79,48 @@ func MigrateDatabase(db *gorm.DB) error {
 	}
 
 	return nil
+}
+
+// Preserve every encrypted record if older clients created case-only aliases.
+// Operators must resolve those collisions before the canonical unique index
+// can be installed; choosing one row here could silently resurrect an asset.
+func enforceCanonicalAssetIDUniqueness(db *gorm.DB) error {
+	return db.Transaction(func(tx *gorm.DB) error {
+		// Serialize the audit, backfill and index creation against concurrent
+		// writes. Deployment must drain older case-sensitive instances first.
+		if err := tx.Exec("LOCK TABLE server_configs IN SHARE ROW EXCLUSIVE MODE").Error; err != nil {
+			return fmt.Errorf("lock server config identities: %w", err)
+		}
+		var duplicateGroups int64
+		if err := tx.Raw(`
+			SELECT COUNT(*) FROM (
+				SELECT user_id, LOWER(BTRIM(asset_id)) AS canonical_asset_id
+				FROM server_configs
+				WHERE BTRIM(asset_id) <> ''
+				GROUP BY user_id, LOWER(BTRIM(asset_id))
+				HAVING COUNT(*) > 1
+			) AS duplicate_assets
+		`).Scan(&duplicateGroups).Error; err != nil {
+			return fmt.Errorf("audit canonical asset identities: %w", err)
+		}
+		if duplicateGroups > 0 {
+			return fmt.Errorf("refusing asset ID canonicalization: %d case-only duplicate asset group(s) require operator recovery before deployment", duplicateGroups)
+		}
+		if err := tx.Exec(`
+			UPDATE server_configs SET asset_id = LOWER(BTRIM(asset_id))
+			WHERE asset_id <> LOWER(BTRIM(asset_id))
+		`).Error; err != nil {
+			return fmt.Errorf("normalize stored asset identities: %w", err)
+		}
+		if err := tx.Exec(`
+			CREATE UNIQUE INDEX IF NOT EXISTS uq_server_configs_user_asset_canonical_nonempty
+			ON server_configs (user_id, LOWER(asset_id))
+			WHERE asset_id <> ''
+		`).Error; err != nil {
+			return fmt.Errorf("create canonical asset identity index: %w", err)
+		}
+		return nil
+	})
 }
 
 // enforceCanonicalUsernameUniqueness makes the database enforce the same
