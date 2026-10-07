@@ -36,20 +36,24 @@ func TestPostgresCanonicalAssetIDMigrationAndDeletion(t *testing.T) {
 	if err := db.Create(stored).Error; err != nil {
 		t.Fatalf("create legacy upper-case record: %v", err)
 	}
+	repo := repository.NewServerConfigRepository(db)
+	svc := NewConfigService(repo)
+	deleted, err := svc.DeleteAsset(user.ID, AssetMutationInput{AssetID: strings.ToLower(legacyUpperID), DeviceID: testDeviceID, OperationID: testDeleteOp, VectorClock: `{"mac":2}`})
+	if err != nil || deleted.State != model.ServerConfigStateDeleted {
+		t.Fatalf("lower-case request did not find legacy upper-case record: record=%+v err=%v", deleted, err)
+	}
 	if err := config.MigrateDatabase(db); err != nil {
 		t.Fatalf("canonical migration: %v", err)
 	}
-	repo := repository.NewServerConfigRepository(db)
 	found, err := repo.FindByAssetIDAndUserID(legacyUpperID, user.ID)
-	if err != nil || found == nil || found.AssetID != strings.ToLower(legacyUpperID) || string(found.EncryptedBlob) != "opaque-ciphertext" {
+	if err != nil || found == nil || found.AssetID != strings.ToLower(legacyUpperID) || found.State != model.ServerConfigStateDeleted || string(found.EncryptedBlob) != "opaque-ciphertext" {
 		t.Fatalf("migration changed identity or ciphertext: record=%+v err=%v", found, err)
 	}
 	if err := db.Create(&model.ServerConfig{UserID: user.ID, AssetID: legacyUpperID, EncryptedBlob: []byte("duplicate"), VectorClock: `{"ios":1}`, State: model.ServerConfigStateActive}).Error; err == nil {
 		t.Fatal("canonical unique index allowed a case-only duplicate")
 	}
-	svc := NewConfigService(repo)
-	deleted, err := svc.DeleteAsset(user.ID, AssetMutationInput{AssetID: legacyUpperID, DeviceID: testDeviceID, OperationID: testDeleteOp, VectorClock: `{"mac":2}`})
-	if err != nil || deleted.State != model.ServerConfigStateDeleted {
-		t.Fatalf("mixed-case deletion failed: record=%+v err=%v", deleted, err)
+	restored, err := svc.RestoreAsset(user.ID, AssetMutationInput{AssetID: legacyUpperID, DeviceID: testDeviceID, OperationID: testRestoreOp, VectorClock: `{"mac":3}`})
+	if err != nil || restored.State != model.ServerConfigStateActive {
+		t.Fatalf("mixed-case restore failed: record=%+v err=%v", restored, err)
 	}
 }
