@@ -6,8 +6,53 @@ import (
 	"time"
 
 	"orbitterm-server/internal/model"
+	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
 )
+
+type loginLogoutRaceRepo struct {
+	repository.UserRepository
+	stored model.User
+}
+
+func (r *loginLogoutRaceRepo) FindByUsername(string) (*model.User, error) {
+	copy := r.stored
+	r.stored.TokenVersion++
+	return &copy, nil
+}
+func (r *loginLogoutRaceRepo) FindByID(uint) (*model.User, error) {
+	copy := r.stored
+	return &copy, nil
+}
+func (r *loginLogoutRaceRepo) Save(user *model.User) error { r.stored = *user; return nil }
+func (r *loginLogoutRaceRepo) RecordLogin(_ uint, at time.Time, ip, userAgent string) error {
+	r.stored.LastLoginAt = &at
+	r.stored.LastLoginIP = ip
+	r.stored.LastLoginUserAgent = userAgent
+	return nil
+}
+
+func TestAdminLoginCannotUndoConcurrentLogout(t *testing.T) {
+	password := "AdminCredential123!"
+	hash, err := utils.HashPasswordArgon2ID(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := &loginLogoutRaceRepo{stored: model.User{ID: 1, Username: "admin@example.com", PasswordHash: hash, Role: model.UserRoleAdmin, TokenVersion: 5}}
+	jwt := newTestJWTManager()
+	svc := NewAdminAuthService(repo, jwt, &fakeAdminAuditService{})
+	pair, err := svc.Login(repo.stored.Username, password, AdminRequestMeta{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := jwt.ParseAndVerifyAccessToken(pair.AccessToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repo.stored.TokenVersion != 6 || claims.TokenVersion != 6 {
+		t.Fatalf("logout overwritten or stale token returned: stored=%d token=%d", repo.stored.TokenVersion, claims.TokenVersion)
+	}
+}
 
 func TestAdminAuthServiceBootstrapStatusNeedsSetup(t *testing.T) {
 	svc := NewAdminAuthService(newFakeUserRepo(), newTestJWTManager(), &fakeAdminAuditService{})

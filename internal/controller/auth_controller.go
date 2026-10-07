@@ -212,6 +212,8 @@ func (c *AuthController) Refresh(ctx *gin.Context) {
 	pair, err := c.authService.Refresh(req.RefreshToken)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrRefreshInProgress):
+			ctx.JSON(http.StatusConflict, gin.H{"success": false, "code": "REFRESH_IN_PROGRESS", "error": "刷新令牌已被并发使用，请等待当前请求完成"})
 		case errors.Is(err, service.ErrInvalidInput):
 			common.Error(ctx, http.StatusBadRequest, "refresh_token 不能为空")
 		case errors.Is(err, service.ErrInvalidCredential):
@@ -253,6 +255,8 @@ func (c *AuthController) ChangePassword(ctx *gin.Context) {
 	pair, err := c.authService.ChangePassword(userID, req.CurrentPassword, req.NewPassword)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrAuthStateChanged):
+			ctx.JSON(http.StatusConflict, gin.H{"success": false, "code": "AUTH_STATE_CHANGED", "error": "账号状态已变化，请重新登录后再修改密码"})
 		case errors.Is(err, service.ErrInvalidInput):
 			common.Error(ctx, http.StatusBadRequest, "当前密码和新密码不能为空")
 		case errors.Is(err, service.ErrWeakPassword):

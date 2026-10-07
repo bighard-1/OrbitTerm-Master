@@ -57,11 +57,28 @@ func JWTAuthMiddleware(jwtManager *utils.JWTManager, userRepo repository.UserRep
 			ctx.Abort()
 			return
 		}
-		if user.ClearExpiredBan(time.Now().UTC()) {
-			if err := userRepo.Save(user); err != nil {
-				common.Error(ctx, http.StatusInternalServerError, "账号状态更新失败")
-				ctx.Abort()
-				return
+		now := time.Now().UTC()
+		if user.BanExpired(now) {
+			if atomic, ok := userRepo.(interface {
+				ClearExpiredBanIfDue(uint, time.Time) (bool, error)
+			}); ok {
+				if _, err := atomic.ClearExpiredBanIfDue(user.ID, now); err != nil {
+					common.Error(ctx, http.StatusInternalServerError, "账号状态更新失败")
+					ctx.Abort()
+					return
+				}
+				user, err = userRepo.FindByID(claims.UserID)
+				if err != nil || user == nil {
+					common.Error(ctx, http.StatusInternalServerError, "账号状态校验失败")
+					ctx.Abort()
+					return
+				}
+			} else if user.ClearExpiredBan(now) {
+				if err := userRepo.Save(user); err != nil {
+					common.Error(ctx, http.StatusInternalServerError, "账号状态更新失败")
+					ctx.Abort()
+					return
+				}
 			}
 		}
 		if user.IsDeleted {

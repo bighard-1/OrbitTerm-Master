@@ -5,12 +5,14 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"orbitterm-server/internal/session"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
 )
 
 var ErrRefreshRejected = errors.New("refresh session rejected")
+var ErrRefreshInProgress = errors.New("refresh session already rotated in another request")
 
 // JWTManager 管理 JWT 令牌签发与校验。
 type JWTManager struct {
@@ -109,6 +111,9 @@ func (m *JWTManager) RotateTokenPair(claims *CustomClaims) (*TokenPair, error) {
 	}
 	accepted, err := m.sessions.Rotate(claims.UserID, claims.SessionID, claims.ID, tokenID, claims.TokenVersion, expires)
 	if err != nil {
+		if errors.Is(err, session.ErrConcurrentRefresh) {
+			return nil, ErrRefreshInProgress
+		}
 		return nil, err
 	}
 	if !accepted {

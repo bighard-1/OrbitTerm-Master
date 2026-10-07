@@ -178,6 +178,9 @@ func (s *migrationBundleService) Restore(adminID uint, encrypted []byte, passphr
 
 func (s *migrationBundleService) snapshot() (migrationBundle, error) {
 	data := migrationData{}
+	// Use the earliest possible bound for this snapshot. Changes committed
+	// while tables are being read must not appear older than the bundle.
+	createdAt := s.now()
 	var users []model.User
 	queries := []struct {
 		name string
@@ -211,7 +214,7 @@ func (s *migrationBundleService) snapshot() (migrationBundle, error) {
 	for _, user := range users {
 		data.Users = append(data.Users, migrationUserFromModel(user))
 	}
-	return migrationBundle{SchemaVersion: migrationBundleSchemaVersion, CreatedAt: s.now(), Environment: s.environmentSnapshot(), Data: data}, nil
+	return migrationBundle{SchemaVersion: migrationBundleSchemaVersion, CreatedAt: createdAt, Environment: s.environmentSnapshot(), Data: data}, nil
 }
 
 func (s *migrationBundleService) restoreData(data migrationData, createdAt time.Time, adminID uint, meta AdminRequestMeta, allowRollback bool) error {
@@ -228,7 +231,7 @@ func (s *migrationBundleService) restoreData(data migrationData, createdAt time.
 		}
 		if !allowRollback {
 			var latest time.Time
-			if err := tx.Raw(`SELECT GREATEST(COALESCE((SELECT MAX(updated_at) FROM users), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM server_configs), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM system_settings), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM registration_invites), to_timestamp(0)))`).Scan(&latest).Error; err != nil {
+			if err := tx.Raw(`SELECT GREATEST(COALESCE((SELECT MAX(updated_at) FROM users), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM server_configs), to_timestamp(0)), COALESCE((SELECT MAX(changed_at) FROM config_sync_changes), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM sync_device_states), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM system_settings), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM registration_invites), to_timestamp(0)), COALESCE((SELECT MAX(created_at) FROM admin_audit_logs WHERE action <> ?), to_timestamp(0)))`, model.AuditActionMigrationBundleExport).Scan(&latest).Error; err != nil {
 				return err
 			}
 			if latest.After(createdAt) {
@@ -240,6 +243,10 @@ func (s *migrationBundleService) restoreData(data migrationData, createdAt time.
 			TokenVersion int64
 		}
 		if err := tx.Model(&model.User{}).Select("id, token_version").Scan(&currentVersions).Error; err != nil {
+			return err
+		}
+		var laterAuditLogs []model.AdminAuditLog
+		if err := tx.Where("created_at > ?", createdAt).Order("id ASC").Find(&laterAuditLogs).Error; err != nil {
 			return err
 		}
 		if err := tx.Exec("DELETE FROM refresh_sessions").Error; err != nil {
@@ -274,6 +281,19 @@ func (s *migrationBundleService) restoreData(data migrationData, createdAt time.
 		}
 		if err := createBatch(tx, &data.AdminAuditLogs); err != nil {
 			return err
+		}
+		includedAudit := make(map[uint]time.Time, len(data.AdminAuditLogs))
+		for _, entry := range data.AdminAuditLogs {
+			includedAudit[entry.ID] = entry.CreatedAt
+		}
+		for i := range laterAuditLogs {
+			if includedAt, ok := includedAudit[laterAuditLogs[i].ID]; ok && includedAt.Equal(laterAuditLogs[i].CreatedAt) {
+				continue
+			}
+			laterAuditLogs[i].ID = 0
+			if err := tx.Create(&laterAuditLogs[i]).Error; err != nil {
+				return err
+			}
 		}
 		if err := createBatch(tx, &data.SystemSettings); err != nil {
 			return err

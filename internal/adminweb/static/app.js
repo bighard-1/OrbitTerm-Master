@@ -1,5 +1,6 @@
 const state = {
   token: sessionStorage.getItem('orbit_admin_token') || '',
+  passwordChangeRequired: false,
   currentView: 'dashboard',
   selectedUserID: null,
   selectedUserIDs: new Set(),
@@ -20,8 +21,11 @@ const api = async (path, options = {}) => {
   const response = await fetch(path, { ...options, headers });
   const payload = await response.json().catch(() => ({ success: false, error: '响应不是 JSON' }));
   if (!response.ok || payload.success === false) {
-    if (response.status === 401) setAuth('');
-    throw new Error(payload.error || `HTTP ${response.status}`);
+    if (response.status === 401 && path !== '/api/v1/auth/password') setAuth('');
+    if (payload.code === 'PASSWORD_CHANGE_REQUIRED' && state.token) requirePasswordChange();
+    const error = new Error(payload.error || `HTTP ${response.status}`);
+    error.code = payload.code;
+    throw error;
   }
   return payload.data;
 };
@@ -37,12 +41,39 @@ function setAuth(token) {
 	state.token = token || '';
 	if (state.token) sessionStorage.setItem('orbit_admin_token', state.token);
 	else {
+		state.passwordChangeRequired = false;
 		sessionStorage.removeItem('orbit_admin_token');
 		clearSensitiveViews();
 	}
 	$('statusPill').textContent = state.token ? '已登录' : '未登录';
 	$('authScreen').classList.toggle('hidden', Boolean(state.token));
-	$('appShell').classList.toggle('hidden', !state.token);
+	$('passwordChangeScreen').classList.toggle('hidden', !state.token || !state.passwordChangeRequired);
+	$('appShell').classList.toggle('hidden', !state.token || state.passwordChangeRequired);
+}
+
+function requirePasswordChange() {
+  state.passwordChangeRequired = true;
+  setAuth(state.token);
+}
+
+async function changeLoginPassword() {
+  const current = $('currentLoginPassword').value;
+  const next = $('newLoginPassword').value;
+  if (next !== $('confirmLoginPassword').value) throw new Error('两次输入的新密码不一致');
+  const data = await api('/api/v1/auth/password', {
+    method: 'POST',
+    body: JSON.stringify({ current_password: current, new_password: next })
+  });
+  const token = data.access_token || data.token;
+  if (!token) throw new Error('改密响应缺少访问令牌，请重新登录');
+  $('currentLoginPassword').value = '';
+  $('newLoginPassword').value = '';
+  $('confirmLoginPassword').value = '';
+  state.passwordChangeRequired = false;
+  setAuth(token);
+  await api('/api/v1/admin/me');
+  toast('密码已修改');
+  await refresh(state.currentView);
 }
 
 function clearSensitiveViews() {
@@ -93,7 +124,16 @@ async function login() {
   if (!token) throw new Error('登录响应缺少访问令牌，请升级后端后重试');
   setAuth(token);
   $('loginPassword').value = '';
-  await api('/api/v1/admin/me');
+  try {
+    await api('/api/v1/admin/me');
+  } catch (error) {
+    if (error.code === 'PASSWORD_CHANGE_REQUIRED') {
+      requirePasswordChange();
+      return;
+    }
+    setAuth('');
+    throw error;
+  }
   toast('登录成功');
   await refresh(state.currentView);
 }
@@ -801,6 +841,8 @@ function escapeHtml(value) {
 }
 
 $('loginButton').addEventListener('click', () => login().catch(err => toast(err.message)));
+$('changeLoginPassword').addEventListener('click', () => changeLoginPassword().catch(err => toast(err.message)));
+$('cancelPasswordChange').addEventListener('click', () => setAuth(''));
 $('bootstrapButton').addEventListener('click', () => bootstrap().catch(err => toast(err.message)));
 $('logoutButton').addEventListener('click', () => { setAuth(''); hideUserDetail(); toast('已退出'); });
 $('savePolicies').addEventListener('click', () => savePolicies().catch(err => toast(err.message)));
@@ -841,6 +883,10 @@ async function initialize() {
       await api('/api/v1/admin/me');
       setAuth(state.token);
     } catch (err) {
+	  if (err.code === 'PASSWORD_CHANGE_REQUIRED') {
+	    requirePasswordChange();
+	    return;
+	  }
       setAuth('');
       toast('管理会话已失效，请重新登录');
       return;

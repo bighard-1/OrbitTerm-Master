@@ -2,17 +2,21 @@ package repository
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"time"
 
 	"orbitterm-server/internal/model"
+	"orbitterm-server/internal/session"
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
 type refreshSessionRepository struct{ db *gorm.DB }
+
+const refreshReplayGrace = 10 * time.Second
 
 func NewRefreshSessionRepository(db *gorm.DB) *refreshSessionRepository {
 	return &refreshSessionRepository{db: db}
@@ -23,6 +27,15 @@ func digestTokenID(id string) string {
 	return hex.EncodeToString(digest[:])
 }
 
+func lockRefreshFamily(tx *gorm.DB, familyID string) error {
+	if tx.Dialector.Name() != "postgres" {
+		return nil
+	}
+	digest := sha256.Sum256([]byte(familyID))
+	key := int64(binary.BigEndian.Uint64(digest[:8]))
+	return tx.Exec("SELECT pg_advisory_xact_lock(?)", key).Error
+}
+
 func (r *refreshSessionRepository) Create(userID uint, familyID, tokenID string, version int64, expires time.Time) error {
 	return r.db.Create(&model.RefreshSession{UserID: userID, FamilyID: familyID, TokenDigest: digestTokenID(tokenID), TokenVersion: version, ExpiresAt: expires}).Error
 }
@@ -31,7 +44,11 @@ func (r *refreshSessionRepository) Create(userID uint, familyID, tokenID string,
 // already been used. The caller must not turn replay into a transaction error.
 func (r *refreshSessionRepository) Rotate(userID uint, familyID, oldID, newID string, version int64, expires time.Time) (bool, error) {
 	accepted := false
+	concurrent := false
 	err := r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockRefreshFamily(tx, familyID); err != nil {
+			return err
+		}
 		var old model.RefreshSession
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("user_id = ? AND family_id = ? AND token_digest = ?", userID, familyID, digestTokenID(oldID)).First(&old).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
@@ -41,7 +58,14 @@ func (r *refreshSessionRepository) Rotate(userID uint, familyID, oldID, newID st
 			return err
 		}
 		now := time.Now().UTC()
-		if old.UsedAt != nil || old.RevokedAt != nil {
+		if old.RevokedAt != nil {
+			return nil
+		}
+		if old.UsedAt != nil {
+			if now.Sub(*old.UsedAt) <= refreshReplayGrace {
+				concurrent = true
+				return nil
+			}
 			return tx.Model(&model.RefreshSession{}).Where("user_id = ? AND family_id = ? AND revoked_at IS NULL", userID, familyID).Update("revoked_at", now).Error
 		}
 		if old.TokenVersion != version || !old.ExpiresAt.After(now) {
@@ -56,6 +80,9 @@ func (r *refreshSessionRepository) Rotate(userID uint, familyID, oldID, newID st
 		accepted = true
 		return nil
 	})
+	if err == nil && concurrent {
+		return false, session.ErrConcurrentRefresh
+	}
 	return accepted, err
 }
 
@@ -66,7 +93,12 @@ func (r *refreshSessionRepository) Active(userID uint, familyID string, version 
 }
 
 func (r *refreshSessionRepository) RevokeFamily(userID uint, familyID string) error {
-	return r.db.Model(&model.RefreshSession{}).Where("user_id = ? AND family_id = ? AND revoked_at IS NULL", userID, familyID).Update("revoked_at", time.Now().UTC()).Error
+	return r.db.Transaction(func(tx *gorm.DB) error {
+		if err := lockRefreshFamily(tx, familyID); err != nil {
+			return err
+		}
+		return tx.Model(&model.RefreshSession{}).Where("user_id = ? AND family_id = ? AND revoked_at IS NULL", userID, familyID).Update("revoked_at", time.Now().UTC()).Error
+	})
 }
 
 func (r *refreshSessionRepository) PruneExpired(limit int) (int64, error) {

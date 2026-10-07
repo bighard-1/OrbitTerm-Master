@@ -21,6 +21,8 @@ var (
 	ErrEmailDomainDenied  = errors.New("邮箱域名不允许注册")
 	ErrWeakPassword       = errors.New("密码复杂度不足")
 	ErrPasswordUnchanged  = errors.New("新密码不能与当前密码相同")
+	ErrRefreshInProgress  = errors.New("刷新令牌正在另一个请求中轮换")
+	ErrAuthStateChanged   = errors.New("账号状态在改密期间发生变化")
 )
 
 // AuthService 提供身份认证相关业务逻辑。
@@ -172,7 +174,7 @@ func (s *authService) LogoutAll(userID uint) error {
 	if userID == 0 {
 		return ErrInvalidInput
 	}
-	if atomicRepo, ok := s.userRepo.(interface { IncrementTokenVersionByUser(uint) error }); ok {
+	if atomicRepo, ok := s.userRepo.(interface{ IncrementTokenVersionByUser(uint) error }); ok {
 		return atomicRepo.IncrementTokenVersionByUser(userID)
 	}
 	user, err := s.userRepo.FindByID(userID)
@@ -204,15 +206,18 @@ func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 	if user == nil || user.Username != claims.Username {
 		return nil, ErrInvalidCredential
 	}
-	if claims.TokenVersion != user.TokenVersion {
-		return nil, ErrInvalidCredential
-	}
 	if err := s.ensureUserCanAuthenticate(user); err != nil {
 		return nil, err
+	}
+	if claims.TokenVersion != user.TokenVersion {
+		return nil, ErrInvalidCredential
 	}
 
 	pair, err := s.jwtManager.RotateTokenPair(claims)
 	if err != nil {
+		if errors.Is(err, utils.ErrRefreshInProgress) {
+			return nil, ErrRefreshInProgress
+		}
 		if errors.Is(err, utils.ErrRefreshRejected) {
 			return nil, ErrInvalidCredential
 		}
@@ -264,10 +269,26 @@ func (s *authService) ChangePassword(userID uint, currentPassword, newPassword s
 		return nil, err
 	}
 	// Build the replacement before persisting the version change. Token signing
-	// is side-effect free, so a failure cannot strand the caller without a token.
+	// and session creation happen before the guarded update. A conflict revokes
+	// the unreturned pair; a concurrent logout must never be overwritten.
 	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion+1)
 	if err != nil {
 		return nil, err
+	}
+	if guarded, ok := s.userRepo.(interface {
+		UpdatePasswordIfCurrent(uint, string, int64, string) (bool, error)
+	}); ok {
+		updated, updateErr := guarded.UpdatePasswordIfCurrent(user.ID, user.PasswordHash, user.TokenVersion, hashed)
+		if updateErr != nil || !updated {
+			if claims, parseErr := s.jwtManager.ParseAndVerifyAccessToken(pair.AccessToken); parseErr == nil {
+				_ = s.jwtManager.RevokeSession(user.ID, claims.SessionID)
+			}
+			if updateErr != nil {
+				return nil, updateErr
+			}
+			return nil, ErrAuthStateChanged
+		}
+		return pair, nil
 	}
 	user.PasswordHash = hashed
 	user.TokenVersion++
@@ -280,9 +301,25 @@ func (s *authService) ChangePassword(userID uint, currentPassword, newPassword s
 
 func (s *authService) ensureUserCanAuthenticate(user *model.User) error {
 	now := time.Now().UTC()
-	if user.ClearExpiredBan(now) {
-		if err := s.userRepo.Save(user); err != nil {
-			return err
+	if user.BanExpired(now) {
+		if atomic, ok := s.userRepo.(interface {
+			ClearExpiredBanIfDue(uint, time.Time) (bool, error)
+		}); ok {
+			if _, err := atomic.ClearExpiredBanIfDue(user.ID, now); err != nil {
+				return err
+			}
+			fresh, err := s.userRepo.FindByID(user.ID)
+			if err != nil {
+				return err
+			}
+			if fresh == nil {
+				return ErrInvalidCredential
+			}
+			*user = *fresh
+		} else if user.ClearExpiredBan(now) {
+			if err := s.userRepo.Save(user); err != nil {
+				return err
+			}
 		}
 	}
 	if user.IsDeleted {

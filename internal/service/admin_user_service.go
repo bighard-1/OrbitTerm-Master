@@ -101,7 +101,7 @@ func withAdminUserTransaction[T any](s *adminUserService, run func(*adminUserSer
 	err := s.db.Transaction(func(tx *gorm.DB) error {
 		copy := *s
 		copy.db = nil
-		copy.userRepo = repository.NewUserRepository(tx)
+		copy.userRepo = repository.NewLockedUserRepository(tx)
 		copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
 		var runErr error
 		result, runErr = run(&copy)

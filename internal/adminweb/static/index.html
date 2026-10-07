@@ -36,6 +36,25 @@
     </div>
   </div>
 
+  <div id="passwordChangeScreen" class="auth-screen hidden">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <div class="logo">O</div>
+        <div><h1>OrbitTerm</h1><p>管理员控制台</p></div>
+      </div>
+      <section class="auth-panel">
+        <h2>修改登录密码</h2>
+        <p>此账号需要先修改登录密码，完成后才能进入管理控制台。</p>
+        <div class="form-grid">
+          <label>当前密码<input id="currentLoginPassword" type="password" autocomplete="current-password" /></label>
+          <label>新密码<input id="newLoginPassword" type="password" autocomplete="new-password" placeholder="至少 12 位，含大小写、数字和特殊字符" /></label>
+          <label>确认新密码<input id="confirmLoginPassword" type="password" autocomplete="new-password" /></label>
+          <div class="actions"><button id="changeLoginPassword" class="primary">修改并进入</button><button id="cancelPasswordChange" class="ghost">退出登录</button></div>
+        </div>
+      </section>
+    </div>
+  </div>
+
   <div id="appShell" class="shell hidden">
     <aside class="sidebar">
       <div class="brand">

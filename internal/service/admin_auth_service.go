@@ -183,11 +183,40 @@ func (s *adminAuthService) Login(username, password string, meta AdminRequestMet
 	}
 
 	now := s.now()
-	user.LastLoginAt = &now
-	user.LastLoginIP = meta.IPAddress
-	user.LastLoginUserAgent = meta.UserAgent
-	if err := s.userRepo.Save(user); err != nil {
-		return nil, err
+	if recorder, ok := s.userRepo.(interface {
+		RecordLogin(uint, time.Time, string, string) error
+	}); ok {
+		if err := recorder.RecordLogin(user.ID, now, meta.IPAddress, meta.UserAgent); err != nil {
+			return nil, err
+		}
+		fresh, err := s.userRepo.FindByID(user.ID)
+		if err != nil {
+			return nil, err
+		}
+		if fresh == nil {
+			return nil, ErrInvalidCredential
+		}
+		user = fresh
+		if !isAdminRole(user.Role) {
+			return nil, ErrAdminPermissionDenied
+		}
+		if err := ensureUserCanAuthenticateForAdmin(user, s.userRepo, s.now()); err != nil {
+			return nil, err
+		}
+		matched, err = utils.VerifyPasswordArgon2ID(password, user.PasswordHash)
+		if err != nil {
+			return nil, err
+		}
+		if !matched {
+			return nil, ErrInvalidCredential
+		}
+	} else {
+		user.LastLoginAt = &now
+		user.LastLoginIP = meta.IPAddress
+		user.LastLoginUserAgent = meta.UserAgent
+		if err := s.userRepo.Save(user); err != nil {
+			return nil, err
+		}
 	}
 
 	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion)
@@ -216,9 +245,25 @@ func isAdminRole(role string) bool {
 }
 
 func ensureUserCanAuthenticateForAdmin(user *model.User, repo repository.UserRepository, now time.Time) error {
-	if user.ClearExpiredBan(now) {
-		if err := repo.Save(user); err != nil {
-			return err
+	if user.BanExpired(now) {
+		if atomic, ok := repo.(interface {
+			ClearExpiredBanIfDue(uint, time.Time) (bool, error)
+		}); ok {
+			if _, err := atomic.ClearExpiredBanIfDue(user.ID, now); err != nil {
+				return err
+			}
+			fresh, err := repo.FindByID(user.ID)
+			if err != nil {
+				return err
+			}
+			if fresh == nil {
+				return ErrInvalidCredential
+			}
+			*user = *fresh
+		} else if user.ClearExpiredBan(now) {
+			if err := repo.Save(user); err != nil {
+				return err
+			}
 		}
 	}
 	if user.IsDeleted {

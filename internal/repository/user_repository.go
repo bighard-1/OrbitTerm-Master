@@ -8,6 +8,7 @@ import (
 	"orbitterm-server/internal/model"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // UserRepository 封装用户数据访问逻辑，避免业务层直接依赖 ORM 细节。
@@ -33,11 +34,17 @@ type UserListFilter struct {
 }
 
 type userRepository struct {
-	db *gorm.DB
+	db        *gorm.DB
+	lockReads bool
 }
 
 func NewUserRepository(db *gorm.DB) UserRepository {
 	return &userRepository{db: db}
+}
+
+// NewLockedUserRepository is for callers already inside a transaction.
+func NewLockedUserRepository(db *gorm.DB) UserRepository {
+	return &userRepository{db: db, lockReads: true}
 }
 
 func (r *userRepository) Create(user *model.User) error {
@@ -48,6 +55,25 @@ func (r *userRepository) Create(user *model.User) error {
 func (r *userRepository) Save(user *model.User) error {
 	user.Username = identity.CanonicalUsername(user.Username)
 	return r.db.Save(user).Error
+}
+
+func (r *userRepository) RecordLogin(id uint, at time.Time, ip, userAgent string) error {
+	return r.db.Model(&model.User{}).Where("id = ?", id).Updates(map[string]any{
+		"last_login_at": at, "last_login_ip": ip, "last_login_user_agent": userAgent,
+	}).Error
+}
+
+func (r *userRepository) UpdatePasswordIfCurrent(id uint, oldHash string, oldVersion int64, newHash string) (bool, error) {
+	result := r.db.Model(&model.User{}).Where("id = ? AND password_hash = ? AND token_version = ?", id, oldHash, oldVersion).
+		Updates(map[string]any{"password_hash": newHash, "token_version": gorm.Expr("token_version + 1"), "must_change_password": false})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (r *userRepository) ClearExpiredBanIfDue(id uint, now time.Time) (bool, error) {
+	result := r.db.Model(&model.User{}).
+		Where("id = ? AND is_banned = ? AND ban_until IS NOT NULL AND ban_until <= ?", id, true, now).
+		Updates(map[string]any{"is_banned": false, "ban_until": nil, "ban_reason": "", "banned_at": nil, "banned_by": nil, "status": gorm.Expr("CASE WHEN is_deleted THEN ? ELSE ? END", model.UserStatusDeleted, model.UserStatusNormal)})
+	return result.RowsAffected == 1, result.Error
 }
 
 func (r *userRepository) IncrementTokenVersionByUser(id uint) error {
@@ -75,7 +101,11 @@ func (r *userRepository) FindByUsername(username string) (*model.User, error) {
 
 func (r *userRepository) FindByID(id uint) (*model.User, error) {
 	var user model.User
-	err := r.db.Where("id = ?", id).First(&user).Error
+	query := r.db.Where("id = ?", id)
+	if r.lockReads {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&user).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, nil
@@ -115,11 +145,14 @@ func (r *userRepository) ListExpiredBans(now time.Time, limit int) ([]model.User
 	}
 
 	var users []model.User
-	err := r.db.
+	query := r.db.
 		Where("is_banned = ? AND ban_until IS NOT NULL AND ban_until <= ?", true, now).
 		Order("ban_until ASC").
-		Limit(limit).
-		Find(&users).Error
+		Limit(limit)
+	if r.lockReads {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.Find(&users).Error
 	return users, err
 }
 
