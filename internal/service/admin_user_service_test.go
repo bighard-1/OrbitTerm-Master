@@ -9,6 +9,25 @@ import (
 	"orbitterm-server/internal/repository"
 )
 
+type fixedRecoveryPolicy struct{ policy model.RecoveryPolicy }
+
+func (p fixedRecoveryPolicy) GetRecoveryPolicy() (model.RecoveryPolicy, error) { return p.policy, nil }
+
+func TestAdminManagedPasswordsAndRecoverySwitch(t *testing.T) {
+	policy := model.DefaultSecurityPolicy()
+	policy.MinPasswordLength = 16
+	recovery := model.DefaultRecoveryPolicy()
+	recovery.LoginPasswordResetEnabled = false
+	repo := newFakeUserRepo(&model.User{ID: 2, Username: "a@example.com", Role: model.UserRoleUser})
+	svc := NewAdminUserServiceWithPolicies(repo, &fakeAdminAuditService{}, fakeSecurityPolicyProvider{policy: policy}, fixedRecoveryPolicy{policy: recovery})
+	if _, err := svc.CreateManagedUser(1, "b@example.com", "Short1!", model.UserRoleUser, "create", AdminRequestMeta{}); !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("create weak password: %v", err)
+	}
+	if _, err := svc.ResetPassword(1, 2, "StrongEnoughPass123!", "reset", AdminRequestMeta{}); !errors.Is(err, ErrPasswordResetDisabled) {
+		t.Fatalf("disabled reset: %v", err)
+	}
+}
+
 func TestAdminUserServiceBanAndUnban(t *testing.T) {
 	now := time.Date(2026, 6, 18, 9, 0, 0, 0, time.UTC)
 	userRepo := newFakeUserRepo(&model.User{
@@ -100,11 +119,11 @@ func TestAdminUserServiceResetPasswordAndForceLogout(t *testing.T) {
 		now:          func() time.Time { return time.Now().UTC() },
 	}
 
-	user, err := svc.ResetPassword(1, 2, "NewStrongPass123", "用户申请", AdminRequestMeta{})
+	user, err := svc.ResetPassword(1, 2, "NewStrongPass123!!", "用户申请", AdminRequestMeta{})
 	if err != nil {
 		t.Fatalf("ResetPassword failed: %v", err)
 	}
-	if user.PasswordHash == "old-hash" || user.PasswordHash == "NewStrongPass123" {
+	if user.PasswordHash == "old-hash" || user.PasswordHash == "NewStrongPass123!!" {
 		t.Fatalf("password hash was not securely replaced: %q", user.PasswordHash)
 	}
 	if !user.MustChangePassword {
@@ -267,11 +286,11 @@ func TestAdminUserServiceCreateManagedUserAndUpdateRole(t *testing.T) {
 		now:          func() time.Time { return time.Now().UTC() },
 	}
 
-	user, err := svc.CreateManagedUser(99, "ops-admin", "StrongPass123", model.UserRoleAdmin, "新增运维管理员", AdminRequestMeta{})
+	user, err := svc.CreateManagedUser(99, "ops-admin", "StrongPass123!", model.UserRoleAdmin, "新增运维管理员", AdminRequestMeta{})
 	if err != nil {
 		t.Fatalf("CreateManagedUser failed: %v", err)
 	}
-	if user.ID == 0 || user.Role != model.UserRoleAdmin || !user.MustChangePassword || user.PasswordHash == "StrongPass123" {
+	if user.ID == 0 || user.Role != model.UserRoleAdmin || !user.MustChangePassword || user.PasswordHash == "StrongPass123!" {
 		t.Fatalf("unexpected created user: %+v", user)
 	}
 

@@ -39,6 +39,12 @@ func IPRateLimit(maxRequests int, window time.Duration) gin.HandlerFunc {
 			lastCleanup = now
 		}
 		bucket := buckets[key]
+		if bucket.windowStart.IsZero() && len(buckets) >= 10000 {
+			mu.Unlock()
+			common.Error(ctx, http.StatusTooManyRequests, "限流容量已满，请稍后再试")
+			ctx.Abort()
+			return
+		}
 		if bucket.windowStart.IsZero() || now.Sub(bucket.windowStart) >= window {
 			bucket = rateLimitBucket{windowStart: now}
 		}

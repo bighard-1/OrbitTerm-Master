@@ -4,6 +4,7 @@ import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -29,11 +30,13 @@ const (
 var (
 	ErrMigrationPassphrase = errors.New("migration passphrase does not meet policy")
 	ErrMigrationBundle     = errors.New("migration bundle is invalid")
+	ErrMigrationRollback   = errors.New("migration bundle is older than live business data")
+	ErrMigrationTooLarge   = errors.New("migration bundle exceeds size limit")
 )
 
 type MigrationBundleService interface {
 	Export(adminID uint, passphrase string, meta AdminRequestMeta) ([]byte, MigrationBundleSummary, error)
-	Restore(adminID uint, encrypted []byte, passphrase string, meta AdminRequestMeta) (MigrationRestoreResult, error)
+	Restore(adminID uint, encrypted []byte, passphrase string, meta AdminRequestMeta, allowRollback bool) (MigrationRestoreResult, error)
 }
 
 type MigrationBundleSummary struct {
@@ -134,19 +137,24 @@ func (s *migrationBundleService) Export(adminID uint, passphrase string, meta Ad
 		return nil, MigrationBundleSummary{}, err
 	}
 	if len(plain) > migrationBundleMaxBytes {
-		return nil, MigrationBundleSummary{}, fmt.Errorf("%w: snapshot exceeds size limit", ErrMigrationBundle)
+		return nil, MigrationBundleSummary{}, ErrMigrationTooLarge
 	}
 	encrypted, err := encryptMigrationBundle(plain, passphrase)
 	if err != nil {
 		return nil, MigrationBundleSummary{}, err
 	}
 	summary := summarizeMigrationBundle(bundle)
-	_ = s.auditService.Record(AdminAuditEntry{AdminUserID: adminID, Action: model.AuditActionMigrationBundleExport, ResourceType: "migration_bundle", ResourceID: fmt.Sprintf("schema:%d", summary.SchemaVersion), IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: "导出加密全量迁移包"})
+	if err := s.auditService.Record(AdminAuditEntry{AdminUserID: adminID, Action: model.AuditActionMigrationBundleExport, ResourceType: "migration_bundle", ResourceID: fmt.Sprintf("schema:%d", summary.SchemaVersion), IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: "导出加密全量迁移包"}); err != nil {
+		return nil, MigrationBundleSummary{}, fmt.Errorf("audit migration export: %w", err)
+	}
 	return encrypted, summary, nil
 }
 
-func (s *migrationBundleService) Restore(adminID uint, encrypted []byte, passphrase string, meta AdminRequestMeta) (MigrationRestoreResult, error) {
-	if adminID == 0 || !validMigrationPassphrase(passphrase) || len(encrypted) > migrationBundleMaxBytes+(1<<20) {
+func (s *migrationBundleService) Restore(adminID uint, encrypted []byte, passphrase string, meta AdminRequestMeta, allowRollback bool) (MigrationRestoreResult, error) {
+	if len(encrypted) > migrationBundleMaxBytes+(1<<20) {
+		return MigrationRestoreResult{}, ErrMigrationTooLarge
+	}
+	if adminID == 0 || !validMigrationPassphrase(passphrase) {
 		return MigrationRestoreResult{}, ErrMigrationBundle
 	}
 	plain, err := decryptMigrationBundle(encrypted, passphrase)
@@ -157,11 +165,10 @@ func (s *migrationBundleService) Restore(adminID uint, encrypted []byte, passphr
 	if err := json.Unmarshal(plain, &bundle); err != nil || !validMigrationBundle(bundle) {
 		return MigrationRestoreResult{}, ErrMigrationBundle
 	}
-	if err := s.restoreData(bundle.Data); err != nil {
+	if err := s.restoreData(bundle.Data, bundle.CreatedAt, adminID, meta, allowRollback); err != nil {
 		return MigrationRestoreResult{}, err
 	}
 	summary := summarizeMigrationBundle(bundle)
-	_ = s.auditService.Record(AdminAuditEntry{AdminUserID: adminID, Action: model.AuditActionMigrationBundleRestore, ResourceType: "migration_bundle", ResourceID: fmt.Sprintf("schema:%d", summary.SchemaVersion), IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: "覆盖恢复加密全量迁移包"})
 	return MigrationRestoreResult{
 		SchemaVersion: summary.SchemaVersion, RestoredAt: s.now(), TableCounts: summary.TableCounts,
 		RuntimeEnvironmentApplied: false, RestartRequired: true, EnvironmentKeys: summary.Environment,
@@ -180,10 +187,25 @@ func (s *migrationBundleService) snapshot() (migrationBundle, error) {
 		{"sync_device_states", &data.SyncDeviceStates}, {"admin_audit_logs", &data.AdminAuditLogs},
 		{"system_settings", &data.SystemSettings}, {"registration_invites", &data.RegistrationCodes},
 	}
-	for _, query := range queries {
-		if err := s.db.Order("id ASC").Find(query.dest).Error; err != nil {
-			return migrationBundle{}, fmt.Errorf("snapshot %s: %w", query.name, err)
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		if tx.Dialector.Name() == "postgres" {
+			var physicalBytes int64
+			if err := tx.Raw(`SELECT SUM(pg_total_relation_size(name::regclass)) FROM (VALUES ('users'), ('server_configs'), ('config_sync_changes'), ('sync_device_states'), ('admin_audit_logs'), ('system_settings'), ('registration_invites')) AS tables(name)`).Scan(&physicalBytes).Error; err != nil {
+				return err
+			}
+			if physicalBytes > migrationBundleMaxBytes {
+				return ErrMigrationTooLarge
+			}
 		}
+		for _, query := range queries {
+			if err := tx.Order("id ASC").Find(query.dest).Error; err != nil {
+				return fmt.Errorf("snapshot %s: %w", query.name, err)
+			}
+		}
+		return nil
+	}, &sql.TxOptions{Isolation: sql.LevelRepeatableRead, ReadOnly: true})
+	if err != nil {
+		return migrationBundle{}, err
 	}
 	data.Users = make([]migrationUser, 0, len(users))
 	for _, user := range users {
@@ -192,16 +214,51 @@ func (s *migrationBundleService) snapshot() (migrationBundle, error) {
 	return migrationBundle{SchemaVersion: migrationBundleSchemaVersion, CreatedAt: s.now(), Environment: s.environmentSnapshot(), Data: data}, nil
 }
 
-func (s *migrationBundleService) restoreData(data migrationData) error {
+func (s *migrationBundleService) restoreData(data migrationData, createdAt time.Time, adminID uint, meta AdminRequestMeta, allowRollback bool) error {
 	users := make([]model.User, 0, len(data.Users))
 	for _, record := range data.Users {
 		users = append(users, record.model())
 	}
 	return s.db.Transaction(func(tx *gorm.DB) error {
+		// Block concurrent writes between the rollback preflight and overwrite.
+		if tx.Dialector.Name() == "postgres" {
+			if err := tx.Exec("LOCK TABLE users, server_configs, system_settings, registration_invites, config_sync_changes, sync_device_states, admin_audit_logs, refresh_sessions IN ACCESS EXCLUSIVE MODE").Error; err != nil {
+				return err
+			}
+		}
+		if !allowRollback {
+			var latest time.Time
+			if err := tx.Raw(`SELECT GREATEST(COALESCE((SELECT MAX(updated_at) FROM users), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM server_configs), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM system_settings), to_timestamp(0)), COALESCE((SELECT MAX(updated_at) FROM registration_invites), to_timestamp(0)))`).Scan(&latest).Error; err != nil {
+				return err
+			}
+			if latest.After(createdAt) {
+				return ErrMigrationRollback
+			}
+		}
+		var currentVersions []struct {
+			ID           uint
+			TokenVersion int64
+		}
+		if err := tx.Model(&model.User{}).Select("id, token_version").Scan(&currentVersions).Error; err != nil {
+			return err
+		}
+		if err := tx.Exec("DELETE FROM refresh_sessions").Error; err != nil {
+			return err
+		}
 		for _, table := range []string{"sync_device_states", "config_sync_changes", "server_configs", "admin_audit_logs", "registration_invites", "system_settings", "users"} {
 			if err := tx.Exec("DELETE FROM " + table).Error; err != nil {
 				return fmt.Errorf("clear %s: %w", table, err)
 			}
+		}
+		byID := make(map[uint]int64, len(currentVersions))
+		for _, current := range currentVersions {
+			byID[current.ID] = current.TokenVersion
+		}
+		for i := range users {
+			if byID[users[i].ID] > users[i].TokenVersion {
+				users[i].TokenVersion = byID[users[i].ID]
+			}
+			users[i].TokenVersion++
 		}
 		if err := createBatch(tx, &users); err != nil {
 			return err
@@ -231,6 +288,9 @@ func (s *migrationBundleService) restoreData(data migrationData) error {
 					return fmt.Errorf("reset %s sequence: %w", table, err)
 				}
 			}
+		}
+		if err := tx.Create(&model.AdminAuditLog{AdminUserID: adminID, Action: model.AuditActionMigrationBundleRestore, ResourceType: "migration_bundle", ResourceID: fmt.Sprintf("schema:%d", migrationBundleSchemaVersion), IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: "覆盖恢复加密全量迁移包"}).Error; err != nil {
+			return fmt.Errorf("audit migration restore: %w", err)
 		}
 		return nil
 	})

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 )
@@ -57,15 +58,20 @@ func ToPublicRecoveryInfo(policy model.RecoveryPolicy) PublicRecoveryInfo {
 }
 
 type recoveryPolicyService struct {
+	db           *gorm.DB
 	settingRepo  repository.SystemSettingRepository
 	auditService AdminAuditService
 }
 
-func NewRecoveryPolicyService(settingRepo repository.SystemSettingRepository, auditService AdminAuditService) RecoveryPolicyService {
-	return &recoveryPolicyService{
+func NewRecoveryPolicyService(settingRepo repository.SystemSettingRepository, auditService AdminAuditService, dbs ...*gorm.DB) RecoveryPolicyService {
+	s := &recoveryPolicyService{
 		settingRepo:  settingRepo,
 		auditService: auditService,
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
 }
 
 func (s *recoveryPolicyService) GetRecoveryPolicy() (model.RecoveryPolicy, error) {
@@ -88,6 +94,19 @@ func (s *recoveryPolicyService) GetRecoveryPolicy() (model.RecoveryPolicy, error
 }
 
 func (s *recoveryPolicyService) UpdateRecoveryPolicy(adminID uint, update RecoveryPolicyUpdate, meta AdminRequestMeta) (model.RecoveryPolicy, error) {
+	if s.db != nil {
+		var result model.RecoveryPolicy
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.settingRepo = repository.NewSystemSettingRepository(tx)
+			copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+			var runErr error
+			result, runErr = copy.UpdateRecoveryPolicy(adminID, update, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 {
 		return model.RecoveryPolicy{}, ErrInvalidInput
 	}
@@ -123,7 +142,7 @@ func (s *recoveryPolicyService) UpdateRecoveryPolicy(adminID uint, update Recove
 		return model.RecoveryPolicy{}, err
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		Action:         model.AuditActionSystemRecoveryPolicyUpdate,
 		ResourceType:   "system_setting",
@@ -133,7 +152,9 @@ func (s *recoveryPolicyService) UpdateRecoveryPolicy(adminID uint, update Recove
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         strings.TrimSpace(update.Reason),
-	})
+	}); err != nil {
+		return model.RecoveryPolicy{}, err
+	}
 	return policy, nil
 }
 

@@ -25,18 +25,27 @@ func TestAdminAuthServiceBootstrapSuperAdmin(t *testing.T) {
 	audit := &fakeAdminAuditService{}
 	svc := NewAdminAuthService(newFakeUserRepo(), newTestJWTManager(), audit)
 
-	user, err := svc.BootstrapSuperAdmin("root-admin", "VeryStrongPass123", AdminRequestMeta{IPAddress: "127.0.0.1"})
+	user, err := svc.BootstrapSuperAdmin("root-admin", "VeryStrongPass123!!", AdminRequestMeta{IPAddress: "127.0.0.1"})
 	if err != nil {
 		t.Fatalf("BootstrapSuperAdmin failed: %v", err)
 	}
 	if user.ID == 0 || user.Role != model.UserRoleSuperAdmin || user.Status != model.UserStatusNormal {
 		t.Fatalf("unexpected super admin: %+v", user)
 	}
-	if user.PasswordHash == "VeryStrongPass123" || user.PasswordHash == "" {
+	if user.PasswordHash == "VeryStrongPass123!!" || user.PasswordHash == "" {
 		t.Fatalf("password was not hashed safely: %q", user.PasswordHash)
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != model.AuditActionAdminBootstrap {
 		t.Fatalf("expected bootstrap audit, got %+v", audit.entries)
+	}
+}
+
+func TestAdminBootstrapUsesRegistrationPasswordPolicy(t *testing.T) {
+	policy := model.DefaultSecurityPolicy()
+	policy.MinPasswordLength = 20
+	svc := NewAdminAuthServiceWithPolicy(newFakeUserRepo(), newTestJWTManager(), &fakeAdminAuditService{}, fakeSecurityPolicyProvider{policy: policy})
+	if _, err := svc.BootstrapSuperAdmin("root-admin", "StrongPass123!", AdminRequestMeta{}); !errors.Is(err, ErrWeakPassword) {
+		t.Fatalf("expected policy rejection, got %v", err)
 	}
 }
 
@@ -47,7 +56,7 @@ func TestAdminAuthServiceBootstrapRejectsExistingAdmin(t *testing.T) {
 		Role:     model.UserRoleAdmin,
 	}), newTestJWTManager(), &fakeAdminAuditService{})
 
-	_, err := svc.BootstrapSuperAdmin("root-admin", "VeryStrongPass123", AdminRequestMeta{})
+	_, err := svc.BootstrapSuperAdmin("root-admin", "VeryStrongPass123!!", AdminRequestMeta{})
 	if !errors.Is(err, ErrAdminAlreadyInitialized) {
 		t.Fatalf("expected ErrAdminAlreadyInitialized, got %v", err)
 	}

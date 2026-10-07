@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 )
@@ -30,6 +31,7 @@ type AuditCleanupResult struct {
 }
 
 type auditPolicyService struct {
+	db           *gorm.DB
 	settingRepo  repository.SystemSettingRepository
 	auditRepo    repository.AdminAuditRepository
 	auditService AdminAuditService
@@ -40,13 +42,18 @@ func NewAuditPolicyService(
 	settingRepo repository.SystemSettingRepository,
 	auditRepo repository.AdminAuditRepository,
 	auditService AdminAuditService,
+	dbs ...*gorm.DB,
 ) AuditPolicyService {
-	return &auditPolicyService{
+	s := &auditPolicyService{
 		settingRepo:  settingRepo,
 		auditRepo:    auditRepo,
 		auditService: auditService,
 		now:          func() time.Time { return time.Now().UTC() },
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
 }
 
 func (s *auditPolicyService) GetAuditPolicy() (model.AuditPolicy, error) {
@@ -69,6 +76,20 @@ func (s *auditPolicyService) GetAuditPolicy() (model.AuditPolicy, error) {
 }
 
 func (s *auditPolicyService) UpdateAuditPolicy(adminID uint, update AuditPolicyUpdate, meta AdminRequestMeta) (model.AuditPolicy, error) {
+	if s.db != nil {
+		var result model.AuditPolicy
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.settingRepo = repository.NewSystemSettingRepository(tx)
+			copy.auditRepo = repository.NewAdminAuditRepository(tx)
+			copy.auditService = NewAdminAuditService(copy.auditRepo)
+			var runErr error
+			result, runErr = copy.UpdateAuditPolicy(adminID, update, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 {
 		return model.AuditPolicy{}, ErrInvalidInput
 	}
@@ -98,7 +119,7 @@ func (s *auditPolicyService) UpdateAuditPolicy(adminID uint, update AuditPolicyU
 		return model.AuditPolicy{}, err
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		Action:         model.AuditActionSystemAuditPolicyUpdate,
 		ResourceType:   "system_setting",
@@ -108,11 +129,27 @@ func (s *auditPolicyService) UpdateAuditPolicy(adminID uint, update AuditPolicyU
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         strings.TrimSpace(update.Reason),
-	})
+	}); err != nil {
+		return model.AuditPolicy{}, err
+	}
 	return policy, nil
 }
 
 func (s *auditPolicyService) CleanupExpiredAuditLogs(adminID uint, reason string, meta AdminRequestMeta) (AuditCleanupResult, error) {
+	if s.db != nil {
+		var result AuditCleanupResult
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.settingRepo = repository.NewSystemSettingRepository(tx)
+			copy.auditRepo = repository.NewAdminAuditRepository(tx)
+			copy.auditService = NewAdminAuditService(copy.auditRepo)
+			var runErr error
+			result, runErr = copy.CleanupExpiredAuditLogs(adminID, reason, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 {
 		return AuditCleanupResult{}, ErrInvalidInput
 	}
@@ -137,7 +174,7 @@ func (s *auditPolicyService) CleanupExpiredAuditLogs(adminID uint, reason string
 		BatchLimit:    policy.CleanupBatchLimit,
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:   adminID,
 		Action:        model.AuditActionSystemAuditCleanup,
 		ResourceType:  "admin_audit_logs",
@@ -146,7 +183,9 @@ func (s *auditPolicyService) CleanupExpiredAuditLogs(adminID uint, reason string
 		IPAddress:     meta.IPAddress,
 		UserAgent:     meta.UserAgent,
 		Reason:        reason,
-	})
+	}); err != nil {
+		return AuditCleanupResult{}, err
+	}
 	return result, nil
 }
 

@@ -12,6 +12,7 @@ import (
 var (
 	ErrMasterKeyRotationInvalidInput = errors.New("master key rotation input is invalid")
 	ErrMasterKeyRotationConflict     = errors.New("master key rotation snapshot is stale")
+	ErrMasterKeyRotationTooLarge     = errors.New("master key rotation exceeds size limit")
 )
 
 // MasterKeyRotationItem contains ciphertext only. The server never receives a
@@ -49,9 +50,15 @@ func (s *masterKeyRotationService) Rotate(
 	if userID == 0 || strings.TrimSpace(currentLoginPassword) == "" || s.repository == nil || s.jwtManager == nil {
 		return nil, ErrMasterKeyRotationInvalidInput
 	}
+	if len(items) > MaxCipherBatchItems {
+		return nil, ErrMasterKeyRotationTooLarge
+	}
 
 	replacements := make([]repository.ConfigCipherReplacement, 0, len(items))
 	for _, item := range items {
+		if len(item.EncryptedBlob) > MaxEncryptedBlobBytes || len(item.ExpectedVectorClock) > MaxVectorClockBytes {
+			return nil, ErrMasterKeyRotationTooLarge
+		}
 		if item.ID == 0 || strings.TrimSpace(item.ExpectedVectorClock) == "" || len(item.EncryptedBlob) == 0 {
 			return nil, ErrMasterKeyRotationInvalidInput
 		}

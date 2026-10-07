@@ -1,0 +1,19 @@
+# Server maturity rollout and rollback
+
+This branch starts at `04f47db` and retains the canonical asset UUID changes and their collision preflight. No online database or client installation is changed by this branch.
+
+## Compatibility gates
+
+1. The default mode is `production`. Inject a random JWT secret and a strong database password before starting; startup fails before a database connection if these are absent or demonstrably weak. Local development must set `APP_ENV=development` explicitly. Rollback: restore the prior binary with the same secrets. Do not rotate the JWT secret merely to roll back.
+2. Managed-account creation and administrator password reset use the registration password policy. Existing passwords are not rehashed or rejected at login. Reset only works while `login_password_reset_enabled` is true. A reset account receives tokens but can use only `/api/v1/auth/password` until the password is changed. The password endpoint already exists; all five clients must handle HTTP 403 and show its change-password flow. Rollback: the old binary ignores this gate; avoid rolling back while reset accounts remain forced-change unless that temporary exposure is acceptable.
+3. Session-store rollout must be staged. Existing refresh JWTs lack a session ID; accept them during a documented compatibility window, then disable legacy refresh only after all five clients have upgraded. New refresh JWTs use an opaque ID and rotate atomically in PostgreSQL. On replay, revoke the token family. Device logout revokes the current family; all-device logout increments the user's token version. Rollback: keep the new table and return to the prior binary; newly issued tokens remain ordinary signed JWTs there and cannot be individually revoked, so treat rollback as an authentication-security downgrade.
+4. Request limits introduce HTTP 413 for oversize encrypted uploads and batches. Keep limits above currently supported client payloads and run five-client boundary tests before release. A rejected batch makes no write. Rollback: old binary removes the limit; no data migration needed.
+5. Full export reads all tables under one repeatable-read snapshot. Restore rejects a package older than current business data unless the multipart form includes `allow_rollback=ALLOW_ROLLBACK`. Database overwrite is a cutover: take and verify a separate PostgreSQL backup, stop writers, then restore. Restored users receive a higher token version and refresh sessions are cleared. Rollback requires restoring the pre-cutover database snapshot, not only changing binaries.
+
+`BACKUP_LAST_SUCCESS_AT` and `RESTORE_DRILL_VERIFIED_AT` are RFC3339 UTC evidence timestamps supplied by an external backup operator. They are prerequisites for a green readiness report, but do not by themselves prove that backup media is intact. Keep the actual backup job and restore drill logs outside the database being protected.
+
+The asset tombstone minimum remains permanent. The existing optional physical cleanup policy must remain disabled in production until a separate sync-protocol rollout is complete.
+
+## Verification
+
+Run `go test ./...` and the PostgreSQL integration suite with an isolated `ORBITTERM_TEST_DATABASE_URL`. Those integration tests create and remove test data; never point them at production. Run the five client test suites against a staging server before deploying a behavior-changing build.

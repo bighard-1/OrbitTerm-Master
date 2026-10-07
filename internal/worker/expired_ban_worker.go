@@ -7,6 +7,7 @@ import (
 
 	"orbitterm-server/internal/config"
 	"orbitterm-server/internal/service"
+	"orbitterm-server/internal/workerstatus"
 )
 
 const (
@@ -41,6 +42,8 @@ func StartExpiredBanWorker(ctx context.Context, cfg config.Config, scanner Expir
 	}
 
 	go func() {
+		workerstatus.Started("expired_bans")
+		defer workerstatus.Stopped("expired_bans")
 		log.Printf("管理端自动解封任务已启动，间隔: %s, 批量上限: %d", interval, limit)
 		timer := time.NewTimer(5 * time.Second)
 		defer timer.Stop()
@@ -60,6 +63,7 @@ func StartExpiredBanWorker(ctx context.Context, cfg config.Config, scanner Expir
 
 func runExpiredBanScan(scanner ExpiredBanScanner, limit int) {
 	result, err := scanner.ScanExpiredBansBySystem(limit, "系统周期性自动解封到期封禁")
+	workerstatus.Completed("expired_bans", err)
 	if err != nil {
 		log.Printf("管理端自动解封任务执行失败: %v", err)
 		return

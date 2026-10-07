@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 )
@@ -46,6 +47,7 @@ type AssetTrashCleanupResult struct {
 }
 
 type assetDeletionPolicyService struct {
+	db           *gorm.DB
 	settingRepo  repository.SystemSettingRepository
 	configRepo   repository.ServerConfigRepository
 	auditService AdminAuditService
@@ -61,13 +63,33 @@ func NewAssetDeletionPolicyManager(
 	settingRepo repository.SystemSettingRepository,
 	configRepo repository.ServerConfigRepository,
 	auditService AdminAuditService,
+	dbs ...*gorm.DB,
 ) AssetDeletionPolicyManager {
-	return &assetDeletionPolicyService{
+	s := &assetDeletionPolicyService{
 		settingRepo:  settingRepo,
 		configRepo:   configRepo,
 		auditService: auditService,
 		now:          func() time.Time { return time.Now().UTC() },
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
+}
+
+func withAssetDeletionTransaction[T any](s *assetDeletionPolicyService, run func(*assetDeletionPolicyService) (T, error)) (T, error) {
+	var result T
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		copy := *s
+		copy.db = nil
+		copy.settingRepo = repository.NewSystemSettingRepository(tx)
+		copy.configRepo = repository.NewServerConfigRepository(tx)
+		copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+		var runErr error
+		result, runErr = run(&copy)
+		return runErr
+	})
+	return result, err
 }
 
 func (s *assetDeletionPolicyService) GetAssetDeletionPolicy() (model.AssetDeletionPolicy, error) {
@@ -91,6 +113,11 @@ func (s *assetDeletionPolicyService) UpdateAssetDeletionPolicy(
 	update AssetDeletionPolicyUpdate,
 	meta AdminRequestMeta,
 ) (model.AssetDeletionPolicy, error) {
+	if s.db != nil {
+		return withAssetDeletionTransaction(s, func(tx *assetDeletionPolicyService) (model.AssetDeletionPolicy, error) {
+			return tx.UpdateAssetDeletionPolicy(adminID, update, meta)
+		})
+	}
 	if adminID == 0 || !validAdminReason(update.Reason) {
 		return model.AssetDeletionPolicy{}, ErrInvalidInput
 	}
@@ -123,12 +150,14 @@ func (s *assetDeletionPolicyService) UpdateAssetDeletionPolicy(
 		return model.AssetDeletionPolicy{}, err
 	}
 	if s.auditService != nil {
-		_ = s.auditService.Record(AdminAuditEntry{
+		if err := s.auditService.Record(AdminAuditEntry{
 			AdminUserID: adminID, Action: model.AuditActionSystemAssetDeletionPolicyUpdate,
 			ResourceType: "system_setting", ResourceID: model.SystemSettingKeyAssetDeletionPolicy,
 			BeforeSnapshot: before, AfterSnapshot: assetDeletionPolicySnapshot(policy),
 			IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: strings.TrimSpace(update.Reason),
-		})
+		}); err != nil {
+			return model.AssetDeletionPolicy{}, err
+		}
 	}
 	return policy, nil
 }
@@ -138,6 +167,11 @@ func (s *assetDeletionPolicyService) CleanupExpiredAssets(
 	reason string,
 	meta AdminRequestMeta,
 ) (AssetTrashCleanupResult, error) {
+	if s.db != nil {
+		return withAssetDeletionTransaction(s, func(tx *assetDeletionPolicyService) (AssetTrashCleanupResult, error) {
+			return tx.CleanupExpiredAssets(adminID, reason, meta)
+		})
+	}
 	if adminID == 0 || !validAdminReason(reason) {
 		return AssetTrashCleanupResult{}, ErrInvalidInput
 	}
@@ -145,6 +179,11 @@ func (s *assetDeletionPolicyService) CleanupExpiredAssets(
 }
 
 func (s *assetDeletionPolicyService) CleanupExpiredAssetsBySystem() (AssetTrashCleanupResult, error) {
+	if s.db != nil {
+		return withAssetDeletionTransaction(s, func(tx *assetDeletionPolicyService) (AssetTrashCleanupResult, error) {
+			return tx.CleanupExpiredAssetsBySystem()
+		})
+	}
 	return s.cleanup(0, "系统周期性清理过期资产密文与安全可回收墓碑", AdminRequestMeta{}, true)
 }
 
@@ -220,12 +259,14 @@ func (s *assetDeletionPolicyService) cleanup(
 	result.CompletedAt = s.now().UTC().Truncate(time.Millisecond)
 
 	if s.auditService != nil && (!systemRun || result.PurgedCount > 0 || result.TombstonesDeleted > 0) {
-		_ = s.auditService.Record(AdminAuditEntry{
+		if err := s.auditService.Record(AdminAuditEntry{
 			AdminUserID: adminID, Action: model.AuditActionSystemAssetTrashCleanup,
 			ResourceType: "server_config", ResourceID: "expired_asset_trash",
 			AfterSnapshot: assetTrashCleanupSnapshot(result), IPAddress: meta.IPAddress,
 			UserAgent: meta.UserAgent, Reason: reason,
-		})
+		}); err != nil {
+			return AssetTrashCleanupResult{}, err
+		}
 	}
 	return result, nil
 }

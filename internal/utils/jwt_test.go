@@ -50,6 +50,32 @@ func TestGenerateTokenPairIncludesTokenVersion(t *testing.T) {
 	}
 }
 
+func TestRefreshRotationKeepsOriginalAuthTimeAndUniqueIDs(t *testing.T) {
+	manager := NewJWTManager("long-randomized-test-secret-0123456789", "orbitterm-test", 15, 30, 24)
+	first, err := manager.GenerateTokenPair(42, "alice", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	claims, err := manager.ParseAndVerifyRefreshToken(first.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := manager.RotateTokenPair(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.RefreshToken == second.RefreshToken {
+		t.Fatal("refresh token was reused")
+	}
+	secondClaims, err := manager.ParseAndVerifyRefreshToken(second.RefreshToken)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if secondClaims.AuthTime != claims.AuthTime || secondClaims.SessionID != claims.SessionID || secondClaims.ID == claims.ID {
+		t.Fatalf("unexpected rotation claims: first=%+v second=%+v", claims, secondClaims)
+	}
+}
+
 func TestJWTManagerRejectsOtherHMACAlgorithms(t *testing.T) {
 	secret := "test-secret-that-is-long-enough"
 	manager := NewJWTManager(secret, "orbitterm-test", 15, 30, 24)

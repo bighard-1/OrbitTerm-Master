@@ -6,10 +6,8 @@ services:
     environment:
       POSTGRES_DB: orbitterm
       POSTGRES_USER: orbitterm
-      POSTGRES_PASSWORD: orbitterm_pass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong database password}
       TZ: UTC
-    ports:
-      - "5432:5432"
     volumes:
       - orbit_db_data:/var/lib/postgresql/data
     healthcheck:
@@ -29,13 +27,18 @@ services:
       orbit-db:
         condition: service_healthy
     environment:
+      APP_ENV: production
       SERVER_PORT: "8080"
-      DATABASE_URL: "host=orbit-db user=orbitterm password=orbitterm_pass dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"
-      JWT_SECRET: "replace-with-strong-jwt-secret"
+      DATABASE_URL: ${DATABASE_URL:?set the full PostgreSQL connection URL}
+      JWT_SECRET: ${JWT_SECRET:?set a random JWT secret}
       JWT_ISSUER: "orbitterm-server"
       JWT_ACCESS_EXPIRE_MINUTES: "15"
       JWT_REFRESH_EXPIRE_DAYS: "30"
-      ADMIN_BOOTSTRAP_TOKEN: "replace-with-strong-admin-bootstrap-token"
+      # Keep enabled during the five-client migration window; disable after all old refresh JWTs expire.
+      ALLOW_LEGACY_REFRESH_TOKENS: ${ALLOW_LEGACY_REFRESH_TOKENS:-true}
+      BACKUP_LAST_SUCCESS_AT: ${BACKUP_LAST_SUCCESS_AT:-}
+      RESTORE_DRILL_VERIFIED_AT: ${RESTORE_DRILL_VERIFIED_AT:-}
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
       ADMIN_AUTO_UNBAN_ENABLED: "true"
       ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
       ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"
@@ -48,7 +51,7 @@ services:
       # 按实际反向代理容器 IP/CIDR 调整；不使用代理可设为空字符串。
       TRUSTED_PROXIES: "127.0.0.1,::1"
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/healthz >/dev/null || exit 1"]
       interval: 10s

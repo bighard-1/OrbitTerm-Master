@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"orbitterm-server/internal/common"
+	"orbitterm-server/internal/middleware"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/service"
 
@@ -16,6 +17,37 @@ type AuthController struct {
 	authService    service.AuthService
 	recoveryPolicy service.RecoveryPolicyReader
 	securityPolicy service.SecurityPolicyProvider
+}
+
+func (c *AuthController) LogoutCurrent(ctx *gin.Context) {
+	userID, ok := extractUserID(ctx)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	sessionID := ctx.GetString(middleware.ContextSessionIDKey)
+	if sessionID == "" {
+		ctx.JSON(http.StatusConflict, gin.H{"success": false, "code": "LEGACY_SESSION", "error": "旧会话没有设备标识，请使用全部设备退出"})
+		return
+	}
+	if err := c.authService.LogoutCurrent(userID, sessionID); err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "退出失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, gin.H{"logged_out": true})
+}
+
+func (c *AuthController) LogoutAll(ctx *gin.Context) {
+	userID, ok := extractUserID(ctx)
+	if !ok {
+		common.Error(ctx, http.StatusUnauthorized, "未授权")
+		return
+	}
+	if err := c.authService.LogoutAll(userID); err != nil {
+		common.Error(ctx, http.StatusInternalServerError, "全部设备退出失败")
+		return
+	}
+	common.Success(ctx, http.StatusOK, gin.H{"logged_out": true})
 }
 
 func NewAuthController(authService service.AuthService, recoveryPolicy service.RecoveryPolicyReader, securityPolicy service.SecurityPolicyProvider) *AuthController {

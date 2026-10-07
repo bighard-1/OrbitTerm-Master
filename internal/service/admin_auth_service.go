@@ -5,13 +5,12 @@ import (
 	"strconv"
 	"time"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 	"orbitterm-server/internal/utils"
 )
-
-const adminPasswordMinLength = 12
 
 var (
 	ErrAdminAlreadyInitialized = errors.New("管理端已初始化")
@@ -36,19 +35,30 @@ type AdminAuthService interface {
 }
 
 type adminAuthService struct {
-	userRepo     repository.UserRepository
-	jwtManager   *utils.JWTManager
-	auditService AdminAuditService
-	now          func() time.Time
+	db             *gorm.DB
+	userRepo       repository.UserRepository
+	jwtManager     *utils.JWTManager
+	auditService   AdminAuditService
+	securityPolicy SecurityPolicyProvider
+	now            func() time.Time
 }
 
 func NewAdminAuthService(userRepo repository.UserRepository, jwtManager *utils.JWTManager, auditService AdminAuditService) AdminAuthService {
-	return &adminAuthService{
-		userRepo:     userRepo,
-		jwtManager:   jwtManager,
-		auditService: auditService,
-		now:          func() time.Time { return time.Now().UTC() },
+	return NewAdminAuthServiceWithPolicy(userRepo, jwtManager, auditService, nil)
+}
+
+func NewAdminAuthServiceWithPolicy(userRepo repository.UserRepository, jwtManager *utils.JWTManager, auditService AdminAuditService, security SecurityPolicyProvider, dbs ...*gorm.DB) AdminAuthService {
+	s := &adminAuthService{
+		userRepo:       userRepo,
+		jwtManager:     jwtManager,
+		auditService:   auditService,
+		securityPolicy: security,
+		now:            func() time.Time { return time.Now().UTC() },
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
 }
 
 func (s *adminAuthService) BootstrapStatus() (*AdminBootstrapStatus, error) {
@@ -63,9 +73,39 @@ func (s *adminAuthService) BootstrapStatus() (*AdminBootstrapStatus, error) {
 }
 
 func (s *adminAuthService) BootstrapSuperAdmin(username, password string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		var result *model.User
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			if tx.Dialector.Name() == "postgres" {
+				if err := tx.Exec("LOCK TABLE users IN SHARE ROW EXCLUSIVE MODE").Error; err != nil {
+					return err
+				}
+			}
+			copy := *s
+			copy.db = nil
+			copy.userRepo = repository.NewUserRepository(tx)
+			copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+			var runErr error
+			result, runErr = copy.BootstrapSuperAdmin(username, password, meta)
+			return runErr
+		})
+		return result, err
+	}
 	username = identity.CanonicalUsername(username)
-	if len(username) < 3 || len(password) < adminPasswordMinLength {
+	if len(username) < 3 {
 		return nil, ErrInvalidInput
+	}
+	policy := model.DefaultSecurityPolicy()
+	if s.securityPolicy != nil {
+		configured, err := s.securityPolicy.GetSecurityPolicy()
+		if err != nil {
+			return nil, err
+		}
+		policy = configured
+	}
+	policy.Normalize()
+	if !ValidateStrongPassword(password, policy.MinPasswordLength) {
+		return nil, ErrWeakPassword
 	}
 
 	status, err := s.BootstrapStatus()
@@ -99,7 +139,7 @@ func (s *adminAuthService) BootstrapSuperAdmin(username, password string, meta A
 		return nil, err
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:  user.ID,
 		TargetUserID: &user.ID,
 		Action:       model.AuditActionAdminBootstrap,
@@ -108,7 +148,9 @@ func (s *adminAuthService) BootstrapSuperAdmin(username, password string, meta A
 		IPAddress:    meta.IPAddress,
 		UserAgent:    meta.UserAgent,
 		Reason:       "first super admin initialized",
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 

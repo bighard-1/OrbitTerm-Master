@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"orbitterm-server/internal/config"
+	"orbitterm-server/internal/workerstatus"
 
 	"gorm.io/gorm"
 )
@@ -21,12 +22,14 @@ type SystemHealthReport struct {
 }
 
 type SystemRuntimeReport struct {
-	GeneratedAt   time.Time             `json:"generated_at"`
-	Status        string                `json:"status"`
-	UptimeSeconds int64                 `json:"uptime_seconds"`
-	Database      DatabaseRuntimeStatus `json:"database"`
-	JWT           JWTRuntimeStatus      `json:"jwt"`
-	AutoUnban     AutoUnbanStatus       `json:"auto_unban"`
+	GeneratedAt   time.Time                      `json:"generated_at"`
+	Status        string                         `json:"status"`
+	UptimeSeconds int64                          `json:"uptime_seconds"`
+	Database      DatabaseRuntimeStatus          `json:"database"`
+	JWT           JWTRuntimeStatus               `json:"jwt"`
+	AutoUnban     AutoUnbanStatus                `json:"auto_unban"`
+	Workers       map[string]workerstatus.Status `json:"workers"`
+	Audit         AuditRuntimeStatus             `json:"audit"`
 }
 
 type DatabaseRuntimeStatus struct {
@@ -101,6 +104,8 @@ func (s *systemHealthService) RuntimeStatus() SystemRuntimeReport {
 		Database:      database,
 		JWT:           s.jwtStatus(),
 		AutoUnban:     s.autoUnbanStatus(),
+		Workers:       workerstatus.Snapshot(),
+		Audit:         currentAuditStatus(),
 	}
 }
 

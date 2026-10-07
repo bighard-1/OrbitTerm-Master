@@ -7,6 +7,7 @@ import (
 
 	"orbitterm-server/internal/config"
 	"orbitterm-server/internal/service"
+	"orbitterm-server/internal/workerstatus"
 )
 
 const (
@@ -31,6 +32,8 @@ func StartAssetTrashCleanupWorker(ctx context.Context, cfg config.Config, cleane
 	}
 
 	go func() {
+		workerstatus.Started("asset_trash_cleanup")
+		defer workerstatus.Stopped("asset_trash_cleanup")
 		log.Printf("资产最近删除清理任务已启动，检查间隔: %s", interval)
 		timer := time.NewTimer(15 * time.Second)
 		defer timer.Stop()
@@ -49,6 +52,7 @@ func StartAssetTrashCleanupWorker(ctx context.Context, cfg config.Config, cleane
 
 func runAssetTrashCleanup(cleaner AssetTrashCleaner) {
 	result, err := cleaner.CleanupExpiredAssetsBySystem()
+	workerstatus.Completed("asset_trash_cleanup", err)
 	if err != nil {
 		log.Printf("资产最近删除清理任务执行失败: %v", err)
 		return

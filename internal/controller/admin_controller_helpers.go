@@ -107,6 +107,8 @@ func (c *AdminController) validateBootstrapToken(ctx *gin.Context) bool {
 
 func writeAdminAuthError(ctx *gin.Context, err error, fallback string) {
 	switch {
+	case errors.Is(err, service.ErrWeakPassword):
+		common.Error(ctx, http.StatusBadRequest, "密码不符合当前安全策略：至少 12 位，并包含大小写字母、数字和特殊字符")
 	case errors.Is(err, service.ErrInvalidInput):
 		common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
 	case errors.Is(err, service.ErrUserAlreadyExists):
@@ -128,6 +130,10 @@ func writeAdminAuthError(ctx *gin.Context, err error, fallback string) {
 
 func writeAdminUserError(ctx *gin.Context, err error, fallback string) {
 	switch {
+	case errors.Is(err, service.ErrWeakPassword):
+		common.Error(ctx, http.StatusBadRequest, "密码不符合当前安全策略：至少 12 位，并包含大小写字母、数字和特殊字符")
+	case errors.Is(err, service.ErrPasswordResetDisabled):
+		common.Error(ctx, http.StatusForbidden, "登录密码重置已关闭")
 	case errors.Is(err, service.ErrInvalidInput):
 		common.Error(ctx, http.StatusBadRequest, "请求参数不合法")
 	case errors.Is(err, service.ErrAdminInvalidAction):

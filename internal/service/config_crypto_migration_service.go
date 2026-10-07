@@ -11,6 +11,7 @@ import (
 var (
 	ErrConfigCipherMigrationInvalidInput = errors.New("config cipher migration input is invalid")
 	ErrConfigCipherMigrationConflict     = errors.New("config cipher migration snapshot is stale")
+	ErrConfigCipherMigrationTooLarge     = errors.New("config cipher migration exceeds size limit")
 )
 
 // ConfigCipherMigrationItem is opaque ciphertext supplied after the client has
@@ -42,10 +43,16 @@ func (s *configCipherMigrationService) MigrateToV2(userID uint, items []ConfigCi
 	if userID == 0 || s.repository == nil || len(items) == 0 {
 		return ErrConfigCipherMigrationInvalidInput
 	}
+	if len(items) > MaxCipherBatchItems {
+		return ErrConfigCipherMigrationTooLarge
+	}
 
 	replacements := make([]repository.ConfigCipherMigrationReplacement, 0, len(items))
 	seen := make(map[uint]struct{}, len(items))
 	for _, item := range items {
+		if len(item.EncryptedBlob) > MaxEncryptedBlobBytes || len(item.ExpectedVectorClock) > MaxVectorClockBytes || len(item.NextVectorClock) > MaxVectorClockBytes {
+			return ErrConfigCipherMigrationTooLarge
+		}
 		if item.ID == 0 || strings.TrimSpace(item.ExpectedVectorClock) == "" ||
 			len(item.EncryptedBlob) == 0 || strings.TrimSpace(item.NextVectorClock) == "" ||
 			!bytes.HasPrefix(item.EncryptedBlob, []byte("OTC2")) {

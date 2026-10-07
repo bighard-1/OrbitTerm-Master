@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 // Config 统一管理服务运行时配置。
 // 这些配置通常来自环境变量，便于在本地、测试、生产之间切换。
 type Config struct {
+	AppEnv                           string
 	ServerPort                       string
 	DatabaseURL                      string
 	JWTSecret                        string
@@ -23,6 +25,9 @@ type Config struct {
 	JWTExpireHours                   int
 	JWTAccessExpireMinutes           int
 	JWTRefreshExpireDays             int
+	AllowLegacyRefresh               bool
+	BackupLastSuccessAt              string
+	RestoreDrillVerifiedAt           string
 	AdminBootstrapToken              string
 	AdminAutoUnbanEnabled            bool
 	AdminAutoUnbanIntervalMinutes    int
@@ -40,6 +45,7 @@ type Config struct {
 // 注意：生产环境请务必通过安全方式注入 JWT_SECRET 与 DATABASE_URL。
 func Load() Config {
 	return Config{
+		AppEnv:                           getEnv("APP_ENV", "production"),
 		ServerPort:                       getEnv("SERVER_PORT", "8080"),
 		DatabaseURL:                      getEnv("DATABASE_URL", "host=127.0.0.1 user=postgres password=postgres dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"),
 		JWTSecret:                        getEnv("JWT_SECRET", "replace-this-with-a-strong-secret"),
@@ -47,6 +53,9 @@ func Load() Config {
 		JWTExpireHours:                   getEnvAsInt("JWT_EXPIRE_HOURS", 24),
 		JWTAccessExpireMinutes:           getEnvAsInt("JWT_ACCESS_EXPIRE_MINUTES", 15),
 		JWTRefreshExpireDays:             getEnvAsInt("JWT_REFRESH_EXPIRE_DAYS", 30),
+		AllowLegacyRefresh:               getEnvAsBool("ALLOW_LEGACY_REFRESH_TOKENS", true),
+		BackupLastSuccessAt:              getEnv("BACKUP_LAST_SUCCESS_AT", ""),
+		RestoreDrillVerifiedAt:           getEnv("RESTORE_DRILL_VERIFIED_AT", ""),
 		AdminBootstrapToken:              getEnv("ADMIN_BOOTSTRAP_TOKEN", ""),
 		AdminAutoUnbanEnabled:            getEnvAsBool("ADMIN_AUTO_UNBAN_ENABLED", true),
 		AdminAutoUnbanIntervalMinutes:    getEnvAsInt("ADMIN_AUTO_UNBAN_INTERVAL_MINUTES", 10),
@@ -56,6 +65,66 @@ func Load() Config {
 		DatabaseLogLevel:                 getEnv("DB_LOG_LEVEL", "warn"),
 		TrustedProxies:                   getEnvAsCSV("TRUSTED_PROXIES", []string{"127.0.0.1", "::1"}),
 	}
+}
+
+// Validate rejects demo credentials before production can connect to a database.
+// Development must be selected explicitly in deployment templates; an unknown
+// environment is never silently treated as development.
+func (c Config) Validate() error {
+	switch strings.ToLower(strings.TrimSpace(c.AppEnv)) {
+	case "development", "test":
+		return nil
+	case "production":
+	default:
+		return fmt.Errorf("APP_ENV must be development, test, or production")
+	}
+	secret := strings.TrimSpace(c.JWTSecret)
+	if len(secret) < 32 || uniqueCharacters(secret) < 16 || weakCredential(secret) {
+		return fmt.Errorf("production JWT_SECRET must be a non-demo secret of at least 32 bytes")
+	}
+	password := databasePassword(c.DatabaseURL)
+	lower := strings.ToLower(password)
+	if len(password) < 16 || uniqueCharacters(password) < 8 || weakCredential(lower) {
+		return fmt.Errorf("production DATABASE_URL requires a non-demo database password of at least 16 bytes")
+	}
+	if c.AdminBootstrapToken != "" && (len(c.AdminBootstrapToken) < 32 || uniqueCharacters(c.AdminBootstrapToken) < 16 || weakCredential(c.AdminBootstrapToken)) {
+		return fmt.Errorf("production ADMIN_BOOTSTRAP_TOKEN must be empty or a non-demo token of at least 32 bytes")
+	}
+	return nil
+}
+
+func uniqueCharacters(value string) int {
+	seen := make(map[rune]struct{})
+	for _, char := range value {
+		seen[char] = struct{}{}
+	}
+	return len(seen)
+}
+
+func weakCredential(value string) bool {
+	lower := strings.ToLower(value)
+	for _, fragment := range []string{"replace", "example", "password", "orbitterm_pass", "qwerty", "123456", "postgres"} {
+		if strings.Contains(lower, fragment) {
+			return true
+		}
+	}
+	return false
+}
+
+func databasePassword(dsn string) string {
+	if u, err := url.Parse(dsn); err == nil && (u.Scheme == "postgres" || u.Scheme == "postgresql") {
+		if u.User != nil {
+			password, _ := u.User.Password()
+			return password
+		}
+		return ""
+	}
+	for _, part := range strings.Fields(dsn) {
+		if strings.HasPrefix(part, "password=") {
+			return strings.Trim(strings.TrimPrefix(part, "password="), "'\"")
+		}
+	}
+	return ""
 }
 
 // NewDatabase 创建 PostgreSQL 连接。

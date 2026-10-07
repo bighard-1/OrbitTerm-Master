@@ -16,7 +16,9 @@ const (
 	// ContextUserIDKey 是 Gin 上下文中存放用户 ID 的键。
 	ContextUserIDKey = "auth_user_id"
 	// ContextUsernameKey 是 Gin 上下文中存放用户名的键。
-	ContextUsernameKey = "auth_username"
+	ContextUsernameKey  = "auth_username"
+	ContextSessionIDKey = "auth_session_id"
+	ContextAuthTimeKey  = "auth_time"
 )
 
 // JWTAuthMiddleware 校验 Authorization: Bearer <Token>。
@@ -77,9 +79,27 @@ func JWTAuthMiddleware(jwtManager *utils.JWTManager, userRepo repository.UserRep
 			ctx.Abort()
 			return
 		}
+		active, err := jwtManager.SessionActive(claims)
+		if err != nil {
+			common.Error(ctx, http.StatusInternalServerError, "会话状态校验失败")
+			ctx.Abort()
+			return
+		}
+		if !active {
+			common.Error(ctx, http.StatusUnauthorized, "会话已退出，请重新登录")
+			ctx.Abort()
+			return
+		}
+		if user.MustChangePassword && ctx.FullPath() != "/api/v1/auth/password" {
+			ctx.JSON(http.StatusForbidden, gin.H{"success": false, "code": "PASSWORD_CHANGE_REQUIRED", "error": "必须先修改登录密码", "password_change_path": "/api/v1/auth/password"})
+			ctx.Abort()
+			return
+		}
 
 		ctx.Set(ContextUserIDKey, claims.UserID)
 		ctx.Set(ContextUsernameKey, claims.Username)
+		ctx.Set(ContextSessionIDKey, claims.SessionID)
+		ctx.Set(ContextAuthTimeKey, claims.AuthTime)
 		ctx.Set(ContextUserRoleKey, user.Role)
 		ctx.Next()
 	}

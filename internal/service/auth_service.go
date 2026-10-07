@@ -29,6 +29,8 @@ type AuthService interface {
 	Login(username, password string) (*utils.TokenPair, error)
 	Refresh(refreshToken string) (*utils.TokenPair, error)
 	ChangePassword(userID uint, currentPassword, newPassword string) (*utils.TokenPair, error)
+	LogoutCurrent(userID uint, sessionID string) error
+	LogoutAll(userID uint) error
 }
 
 type authService struct {
@@ -159,6 +161,31 @@ func (s *authService) Login(username, password string) (*utils.TokenPair, error)
 	return pair, nil
 }
 
+func (s *authService) LogoutCurrent(userID uint, sessionID string) error {
+	if userID == 0 || sessionID == "" {
+		return ErrInvalidInput
+	}
+	return s.jwtManager.RevokeSession(userID, sessionID)
+}
+
+func (s *authService) LogoutAll(userID uint) error {
+	if userID == 0 {
+		return ErrInvalidInput
+	}
+	if atomicRepo, ok := s.userRepo.(interface { IncrementTokenVersionByUser(uint) error }); ok {
+		return atomicRepo.IncrementTokenVersionByUser(userID)
+	}
+	user, err := s.userRepo.FindByID(userID)
+	if err != nil {
+		return err
+	}
+	if user == nil {
+		return ErrInvalidCredential
+	}
+	user.TokenVersion++
+	return s.userRepo.Save(user)
+}
+
 func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 	token := strings.TrimSpace(refreshToken)
 	if token == "" {
@@ -184,8 +211,11 @@ func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 		return nil, err
 	}
 
-	pair, err := s.jwtManager.GenerateTokenPair(user.ID, user.Username, user.TokenVersion)
+	pair, err := s.jwtManager.RotateTokenPair(claims)
 	if err != nil {
+		if errors.Is(err, utils.ErrRefreshRejected) {
+			return nil, ErrInvalidCredential
+		}
 		return nil, err
 	}
 	return pair, nil

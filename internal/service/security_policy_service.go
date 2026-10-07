@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"strings"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 )
@@ -28,15 +29,20 @@ type SecurityPolicyService interface {
 }
 
 type securityPolicyService struct {
+	db           *gorm.DB
 	settingRepo  repository.SystemSettingRepository
 	auditService AdminAuditService
 }
 
-func NewSecurityPolicyService(settingRepo repository.SystemSettingRepository, auditService AdminAuditService) SecurityPolicyService {
-	return &securityPolicyService{
+func NewSecurityPolicyService(settingRepo repository.SystemSettingRepository, auditService AdminAuditService, dbs ...*gorm.DB) SecurityPolicyService {
+	s := &securityPolicyService{
 		settingRepo:  settingRepo,
 		auditService: auditService,
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
 }
 
 func (s *securityPolicyService) GetSecurityPolicy() (model.SecurityPolicy, error) {
@@ -59,6 +65,19 @@ func (s *securityPolicyService) GetSecurityPolicy() (model.SecurityPolicy, error
 }
 
 func (s *securityPolicyService) UpdateSecurityPolicy(adminID uint, update SecurityPolicyUpdate, meta AdminRequestMeta) (model.SecurityPolicy, error) {
+	if s.db != nil {
+		var result model.SecurityPolicy
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.settingRepo = repository.NewSystemSettingRepository(tx)
+			copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+			var runErr error
+			result, runErr = copy.UpdateSecurityPolicy(adminID, update, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 {
 		return model.SecurityPolicy{}, ErrInvalidInput
 	}
@@ -100,7 +119,7 @@ func (s *securityPolicyService) UpdateSecurityPolicy(adminID uint, update Securi
 		return model.SecurityPolicy{}, err
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		Action:         model.AuditActionSystemSecurityPolicyUpdate,
 		ResourceType:   "system_setting",
@@ -110,7 +129,9 @@ func (s *securityPolicyService) UpdateSecurityPolicy(adminID uint, update Securi
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         strings.TrimSpace(update.Reason),
-	})
+	}); err != nil {
+		return model.SecurityPolicy{}, err
+	}
 	return policy, nil
 }
 

@@ -15,6 +15,25 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+const (
+	maxEncryptedBlobBytes = service.MaxEncryptedBlobBytes
+	maxVectorClockBytes   = service.MaxVectorClockBytes
+	maxBatchItems         = service.MaxCipherBatchItems
+)
+
+func configRequestTooLarge(ctx *gin.Context, err error) bool {
+	var maxErr *http.MaxBytesError
+	if errors.As(err, &maxErr) {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "请求体超过大小上限")
+		return true
+	}
+	return false
+}
+
+func oversizedConfigItem(blobBase64, vectorClock string) bool {
+	return len(blobBase64) > ((maxEncryptedBlobBytes+2)/3)*4 || len(vectorClock) > maxVectorClockBytes
+}
+
 // ConfigController 负责处理云同步接口。
 type ConfigController struct {
 	configService                service.ConfigService
@@ -91,7 +110,14 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 
 	var req uploadConfigRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
+		if configRequestTooLarge(ctx, err) {
+			return
+		}
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if oversizedConfigItem(req.EncryptedBlobBase64, req.VectorClock) {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "密文或向量钟超过大小上限")
 		return
 	}
 
@@ -104,6 +130,8 @@ func (c *ConfigController) Upload(ctx *gin.Context) {
 	result, err := c.configService.Upload(userID, req.ID, req.AssetID, req.IdentityFingerprint, encryptedBlob, req.VectorClock)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrConfigTooLarge):
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "密文或向量钟超过大小上限")
 		case errors.Is(err, service.ErrConfigInvalidInput):
 			common.Error(ctx, http.StatusBadRequest, "配置参数不合法")
 		case errors.Is(err, service.ErrConfigNotFound):
@@ -141,11 +169,22 @@ func (c *ConfigController) RotateMasterKey(ctx *gin.Context) {
 
 	var req masterKeyRotationRequest
 	if err := ctx.ShouldBindJSON(&req); err != nil {
+		if configRequestTooLarge(ctx, err) {
+			return
+		}
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if len(req.Items) > maxBatchItems {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "批量项目超过大小上限")
 		return
 	}
 	items := make([]service.MasterKeyRotationItem, 0, len(req.Items))
 	for _, item := range req.Items {
+		if oversizedConfigItem(item.EncryptedBlobBase64, item.ExpectedVectorClock) {
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "密文或向量钟超过大小上限")
+			return
+		}
 		blob, err := base64.StdEncoding.DecodeString(item.EncryptedBlobBase64)
 		if err != nil {
 			common.Error(ctx, http.StatusBadRequest, "encrypted_blob_base64 不是合法的 Base64")
@@ -161,6 +200,8 @@ func (c *ConfigController) RotateMasterKey(ctx *gin.Context) {
 	pair, err := c.masterKeyRotationService.Rotate(userID, req.CurrentLoginPassword, items)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrMasterKeyRotationTooLarge):
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "整批轮换超过大小上限")
 		case errors.Is(err, service.ErrMasterKeyRotationInvalidInput):
 			common.Error(ctx, http.StatusBadRequest, "主密码轮换参数不合法")
 		case errors.Is(err, service.ErrMasterKeyRotationConflict):
@@ -200,12 +241,27 @@ func (c *ConfigController) MigrateConfigCryptoV2(ctx *gin.Context) {
 		return
 	}
 	var req configCipherMigrationRequest
-	if err := ctx.ShouldBindJSON(&req); err != nil || len(req.Items) == 0 {
+	if err := ctx.ShouldBindJSON(&req); err != nil {
+		if configRequestTooLarge(ctx, err) {
+			return
+		}
 		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if len(req.Items) == 0 {
+		common.Error(ctx, http.StatusBadRequest, "请求参数格式错误")
+		return
+	}
+	if len(req.Items) > maxBatchItems {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "批量项目超过大小上限")
 		return
 	}
 	items := make([]service.ConfigCipherMigrationItem, 0, len(req.Items))
 	for _, item := range req.Items {
+		if oversizedConfigItem(item.EncryptedBlobBase64, item.ExpectedVectorClock) || len(item.NextVectorClock) > maxVectorClockBytes {
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "密文或向量钟超过大小上限")
+			return
+		}
 		blob, err := base64.StdEncoding.DecodeString(item.EncryptedBlobBase64)
 		if err != nil {
 			common.Error(ctx, http.StatusBadRequest, "encrypted_blob_base64 不是合法的 Base64")
@@ -226,6 +282,8 @@ func (c *ConfigController) MigrateConfigCryptoV2(ctx *gin.Context) {
 	}
 	if err := c.configCipherMigrationService.MigrateToV2(userID, items); err != nil {
 		switch {
+		case errors.Is(err, service.ErrConfigCipherMigrationTooLarge):
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "整批迁移超过大小上限")
 		case errors.Is(err, service.ErrConfigCipherMigrationInvalidInput):
 			common.Error(ctx, http.StatusBadRequest, "加密格式迁移参数不合法")
 		case errors.Is(err, service.ErrConfigCipherMigrationConflict):

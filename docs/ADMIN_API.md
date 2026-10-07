@@ -556,3 +556,8 @@ Content-Type: application/json
 ### 该账号无管理端权限
 
 说明：普通用户不能登录管理端，需要 `support`、`admin` 或 `super_admin` 角色。
+# 会话与敏感操作
+
+迁移包导出/恢复、用户重置密码、角色调整和批量强制下线使用最近 10 分钟内经密码验证的管理会话。过期时返回 HTTP 403、`code=ADMIN_REAUTH_REQUIRED`；重新登录后重试。重置密码会遵守恢复策略的 `login_password_reset_enabled` 开关及当前注册密码强度，并将目标账号限制在登录改密接口直至其自行更改密码。
+
+恢复较旧迁移包默认返回 HTTP 409。确认停写、独立备份和恢复演练后，恢复请求的 multipart 表单可以附加 `allow_rollback=ALLOW_ROLLBACK`；恢复后所有用户会话失效。

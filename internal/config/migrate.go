@@ -23,6 +23,7 @@ func MigrateDatabase(db *gorm.DB) error {
 		&model.AdminAuditLog{},
 		&model.SystemSetting{},
 		&model.RegistrationInvite{},
+		&model.RefreshSession{},
 	); err != nil {
 		return fmt.Errorf("auto migrate database: %w", err)
 	}

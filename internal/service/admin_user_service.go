@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/identity"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
@@ -14,9 +15,10 @@ import (
 )
 
 var (
-	ErrAdminTargetNotFound = errors.New("目标用户不存在")
-	ErrAdminInvalidAction  = errors.New("管理操作不合法")
-	ErrAdminReasonRequired = errors.New("管理操作原因必填")
+	ErrAdminTargetNotFound   = errors.New("目标用户不存在")
+	ErrAdminInvalidAction    = errors.New("管理操作不合法")
+	ErrAdminReasonRequired   = errors.New("管理操作原因必填")
+	ErrPasswordResetDisabled = errors.New("登录密码重置已关闭")
 )
 
 type AdminUserService interface {
@@ -66,19 +68,62 @@ type AdminBulkForceLogoutResult struct {
 }
 
 type adminUserService struct {
-	userRepo     repository.UserRepository
-	auditService AdminAuditService
-	now          func() time.Time
+	db             *gorm.DB
+	userRepo       repository.UserRepository
+	auditService   AdminAuditService
+	securityPolicy SecurityPolicyProvider
+	recoveryPolicy RecoveryPolicyReader
+	now            func() time.Time
 }
 
 func NewAdminUserService(userRepo repository.UserRepository, auditService AdminAuditService) AdminUserService {
-	return &adminUserService{
-		userRepo:     userRepo,
-		auditService: auditService,
+	return NewAdminUserServiceWithPolicies(userRepo, auditService, nil, nil)
+}
+
+func NewAdminUserServiceWithPolicies(userRepo repository.UserRepository, auditService AdminAuditService, security SecurityPolicyProvider, recovery RecoveryPolicyReader, dbs ...*gorm.DB) AdminUserService {
+	s := &adminUserService{
+		userRepo:       userRepo,
+		auditService:   auditService,
+		securityPolicy: security,
+		recoveryPolicy: recovery,
 		now: func() time.Time {
 			return time.Now().UTC()
 		},
 	}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
+}
+
+func withAdminUserTransaction[T any](s *adminUserService, run func(*adminUserService) (T, error)) (T, error) {
+	var result T
+	err := s.db.Transaction(func(tx *gorm.DB) error {
+		copy := *s
+		copy.db = nil
+		copy.userRepo = repository.NewUserRepository(tx)
+		copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+		var runErr error
+		result, runErr = run(&copy)
+		return runErr
+	})
+	return result, err
+}
+
+func (s *adminUserService) validateManagedPassword(password string) error {
+	policy := model.DefaultSecurityPolicy()
+	if s.securityPolicy != nil {
+		configured, err := s.securityPolicy.GetSecurityPolicy()
+		if err != nil {
+			return err
+		}
+		policy = configured
+	}
+	policy.Normalize()
+	if !ValidateStrongPassword(password, policy.MinPasswordLength) {
+		return ErrWeakPassword
+	}
+	return nil
 }
 
 func (s *adminUserService) ListUsers(filter AdminUserListFilter) ([]model.User, int64, error) {
@@ -106,6 +151,11 @@ func (s *adminUserService) GetUser(id uint) (*model.User, error) {
 }
 
 func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *int, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.BanUser(adminID, targetUserID, durationMinutes, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -141,7 +191,7 @@ func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserBan,
@@ -152,11 +202,18 @@ func (s *adminUserService) BanUser(adminID, targetUserID uint, durationMinutes *
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         user.BanReason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.UnbanUser(adminID, targetUserID, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -186,7 +243,7 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserUnban,
@@ -197,13 +254,32 @@ func (s *adminUserService) UnbanUser(adminID, targetUserID uint, reason string, 
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword, reason string, meta AdminRequestMeta) (*model.User, error) {
-	if adminID == 0 || targetUserID == 0 || len(newPassword) < 8 {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.ResetPassword(adminID, targetUserID, newPassword, reason, meta)
+		})
+	}
+	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
+	}
+	if err := s.validateManagedPassword(newPassword); err != nil {
+		return nil, err
+	}
+	if s.recoveryPolicy != nil {
+		policy, err := s.recoveryPolicy.GetRecoveryPolicy()
+		if err != nil {
+			return nil, err
+		}
+		if !policy.LoginPasswordResetEnabled {
+			return nil, ErrPasswordResetDisabled
+		}
 	}
 	reason = strings.TrimSpace(reason)
 	if !validAdminReason(reason) {
@@ -228,7 +304,7 @@ func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserResetPassword,
@@ -239,11 +315,18 @@ func (s *adminUserService) ResetPassword(adminID, targetUserID uint, newPassword
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.ForceLogout(adminID, targetUserID, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -263,7 +346,7 @@ func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserForceLogout,
@@ -274,11 +357,18 @@ func (s *adminUserService) ForceLogout(adminID, targetUserID uint, reason string
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.SoftDeleteUser(adminID, targetUserID, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -305,7 +395,7 @@ func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason str
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserSoftDelete,
@@ -316,11 +406,18 @@ func (s *adminUserService) SoftDeleteUser(adminID, targetUserID uint, reason str
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.RestoreUser(adminID, targetUserID, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -347,7 +444,7 @@ func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserRestore,
@@ -358,11 +455,18 @@ func (s *adminUserService) RestoreUser(adminID, targetUserID uint, reason string
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) ScanExpiredBans(adminID uint, limit int, reason string, meta AdminRequestMeta) (*AdminExpiredBanScanResult, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*AdminExpiredBanScanResult, error) {
+			return tx.ScanExpiredBans(adminID, limit, reason, meta)
+		})
+	}
 	if adminID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -370,12 +474,25 @@ func (s *adminUserService) ScanExpiredBans(adminID uint, limit int, reason strin
 }
 
 func (s *adminUserService) ScanExpiredBansBySystem(limit int, reason string) (*AdminExpiredBanScanResult, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*AdminExpiredBanScanResult, error) {
+			return tx.ScanExpiredBansBySystem(limit, reason)
+		})
+	}
 	return s.scanExpiredBans(0, limit, reason, AdminRequestMeta{IPAddress: "system", UserAgent: "orbitterm-auto-unban-worker"})
 }
 
 func (s *adminUserService) CreateManagedUser(adminID uint, username, password, role, reason string, meta AdminRequestMeta) (*model.User, error) {
-	if adminID == 0 || len(password) < 8 {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.CreateManagedUser(adminID, username, password, role, reason, meta)
+		})
+	}
+	if adminID == 0 {
 		return nil, ErrInvalidInput
+	}
+	if err := s.validateManagedPassword(password); err != nil {
+		return nil, err
 	}
 	username = identity.CanonicalUsername(username)
 	role = strings.TrimSpace(role)
@@ -411,7 +528,7 @@ func (s *adminUserService) CreateManagedUser(adminID uint, username, password, r
 	if err := s.userRepo.Create(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:   adminID,
 		TargetUserID:  &user.ID,
 		Action:        model.AuditActionAdminUserCreate,
@@ -421,11 +538,18 @@ func (s *adminUserService) CreateManagedUser(adminID uint, username, password, r
 		IPAddress:     meta.IPAddress,
 		UserAgent:     meta.UserAgent,
 		Reason:        reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) UpdateUserRole(adminID, targetUserID uint, role, reason string, meta AdminRequestMeta) (*model.User, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*model.User, error) {
+			return tx.UpdateUserRole(adminID, targetUserID, role, reason, meta)
+		})
+	}
 	if adminID == 0 || targetUserID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -452,7 +576,7 @@ func (s *adminUserService) UpdateUserRole(adminID, targetUserID uint, role, reas
 	if err := s.userRepo.Save(user); err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:    adminID,
 		TargetUserID:   &targetUserID,
 		Action:         model.AuditActionUserRoleUpdate,
@@ -463,11 +587,18 @@ func (s *adminUserService) UpdateUserRole(adminID, targetUserID uint, role, reas
 		IPAddress:      meta.IPAddress,
 		UserAgent:      meta.UserAgent,
 		Reason:         reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func (s *adminUserService) ForceLogoutRegularUsers(adminID uint, reason string, meta AdminRequestMeta) (*AdminBulkForceLogoutResult, error) {
+	if s.db != nil {
+		return withAdminUserTransaction(s, func(tx *adminUserService) (*AdminBulkForceLogoutResult, error) {
+			return tx.ForceLogoutRegularUsers(adminID, reason, meta)
+		})
+	}
 	if adminID == 0 {
 		return nil, ErrInvalidInput
 	}
@@ -485,7 +616,7 @@ func (s *adminUserService) ForceLogoutRegularUsers(adminID uint, reason string, 
 		AffectedCount: affected,
 	}
 
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID:   adminID,
 		Action:        model.AuditActionUserBulkForceLogout,
 		ResourceType:  "user",
@@ -494,7 +625,9 @@ func (s *adminUserService) ForceLogoutRegularUsers(adminID uint, reason string, 
 		IPAddress:     meta.IPAddress,
 		UserAgent:     meta.UserAgent,
 		Reason:        reason,
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return result, nil
 }
 
@@ -534,7 +667,7 @@ func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason strin
 			Username: user.Username,
 			Status:   user.Status,
 		})
-		_ = s.auditService.Record(AdminAuditEntry{
+		if err := s.auditService.Record(AdminAuditEntry{
 			AdminUserID:    adminID,
 			TargetUserID:   &user.ID,
 			Action:         model.AuditActionUserAutoUnban,
@@ -545,7 +678,9 @@ func (s *adminUserService) scanExpiredBans(adminID uint, limit int, reason strin
 			IPAddress:      meta.IPAddress,
 			UserAgent:      meta.UserAgent,
 			Reason:         reason,
-		})
+		}); err != nil {
+			return nil, err
+		}
 	}
 	return result, nil
 }

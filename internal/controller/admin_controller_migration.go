@@ -53,6 +53,11 @@ func (c *AdminController) RestoreMigrationBundle(ctx *gin.Context) {
 	}
 	ctx.Request.Body = http.MaxBytesReader(ctx.Writer, ctx.Request.Body, migrationUploadLimit)
 	if err := ctx.Request.ParseMultipartForm(migrationUploadLimit); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			common.Error(ctx, http.StatusRequestEntityTooLarge, "迁移包超过大小上限")
+			return
+		}
 		common.Error(ctx, http.StatusBadRequest, "迁移包过大或表单无效")
 		return
 	}
@@ -70,12 +75,17 @@ func (c *AdminController) RestoreMigrationBundle(ctx *gin.Context) {
 		return
 	}
 	defer file.Close()
-	encrypted, err := io.ReadAll(io.LimitReader(file, migrationUploadLimit))
+	encrypted, err := io.ReadAll(io.LimitReader(file, migrationUploadLimit+1))
 	if err != nil {
 		common.Error(ctx, http.StatusBadRequest, "迁移包读取失败")
 		return
 	}
-	result, err := c.migrationBundles.Restore(adminID, encrypted, ctx.PostForm("passphrase"), requestMeta(ctx))
+	if len(encrypted) > migrationUploadLimit {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "迁移包超过大小上限")
+		return
+	}
+	allowRollback := ctx.PostForm("allow_rollback") == "ALLOW_ROLLBACK"
+	result, err := c.migrationBundles.Restore(adminID, encrypted, ctx.PostForm("passphrase"), requestMeta(ctx), allowRollback)
 	if err != nil {
 		writeMigrationError(ctx, err, "迁移包恢复失败，数据库未做部分覆盖")
 		return
@@ -84,6 +94,14 @@ func (c *AdminController) RestoreMigrationBundle(ctx *gin.Context) {
 }
 
 func writeMigrationError(ctx *gin.Context, err error, fallback string) {
+	if errors.Is(err, service.ErrMigrationTooLarge) {
+		common.Error(ctx, http.StatusRequestEntityTooLarge, "迁移包超过大小上限")
+		return
+	}
+	if errors.Is(err, service.ErrMigrationRollback) {
+		common.Error(ctx, http.StatusConflict, "迁移包早于当前业务数据；仅在已停写且确认独立备份后使用 allow_rollback=ALLOW_ROLLBACK")
+		return
+	}
 	if errors.Is(err, service.ErrMigrationPassphrase) {
 		common.Error(ctx, http.StatusBadRequest, "迁移包口令至少 16 位，且首尾不能有空格")
 		return

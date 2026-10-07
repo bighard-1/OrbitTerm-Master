@@ -50,6 +50,17 @@ func (r *userRepository) Save(user *model.User) error {
 	return r.db.Save(user).Error
 }
 
+func (r *userRepository) IncrementTokenVersionByUser(id uint) error {
+	result := r.db.Model(&model.User{}).Where("id = ?", id).Update("token_version", gorm.Expr("token_version + 1"))
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
 func (r *userRepository) FindByUsername(username string) (*model.User, error) {
 	var user model.User
 	err := r.db.Where("LOWER(BTRIM(username)) = ?", identity.CanonicalUsername(username)).First(&user).Error

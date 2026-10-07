@@ -12,6 +12,7 @@ import (
 
 var (
 	ErrConfigInvalidInput  = errors.New("配置参数不合法")
+	ErrConfigTooLarge      = errors.New("配置超过大小上限")
 	ErrConfigNotFound      = errors.New("配置不存在")
 	ErrConfigInvalidState  = errors.New("配置当前状态不允许此操作")
 	ErrConfigPurged        = errors.New("配置已经永久删除")
@@ -104,6 +105,9 @@ func normalizeConfigUploadInput(
 		identityFingerprint: strings.ToLower(strings.TrimSpace(identityFingerprint)),
 		encryptedBlob:       encryptedBlob,
 		vectorClock:         vectorClock,
+	}
+	if len(input.encryptedBlob) > MaxEncryptedBlobBytes || len(input.vectorClock) > MaxVectorClockBytes {
+		return configUploadInput{}, ErrConfigTooLarge
 	}
 	if input.userID == 0 || len(input.encryptedBlob) == 0 || !validVectorClock(input.vectorClock) {
 		return configUploadInput{}, ErrConfigInvalidInput

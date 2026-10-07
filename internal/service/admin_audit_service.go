@@ -1,9 +1,28 @@
 package service
 
 import (
+	"log"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
+	"sync"
+	"time"
 )
+
+type AuditRuntimeStatus struct {
+	WriteFailures uint64     `json:"write_failures"`
+	LastFailureAt *time.Time `json:"last_failure_at,omitempty"`
+}
+
+var auditRuntime = struct {
+	sync.Mutex
+	status AuditRuntimeStatus
+}{}
+
+func currentAuditStatus() AuditRuntimeStatus {
+	auditRuntime.Lock()
+	defer auditRuntime.Unlock()
+	return auditRuntime.status
+}
 
 type AdminAuditService interface {
 	Record(entry AdminAuditEntry) error
@@ -46,7 +65,7 @@ func (s *adminAuditService) Record(entry AdminAuditEntry) error {
 		return ErrInvalidInput
 	}
 
-	return s.repo.Create(&model.AdminAuditLog{
+	err := s.repo.Create(&model.AdminAuditLog{
 		AdminUserID:    entry.AdminUserID,
 		TargetUserID:   entry.TargetUserID,
 		Action:         entry.Action,
@@ -58,6 +77,15 @@ func (s *adminAuditService) Record(entry AdminAuditEntry) error {
 		UserAgent:      entry.UserAgent,
 		Reason:         entry.Reason,
 	})
+	if err != nil {
+		log.Printf("CRITICAL: admin audit write failed action=%s resource_type=%s: %v", entry.Action, entry.ResourceType, err)
+		auditRuntime.Lock()
+		auditRuntime.status.WriteFailures++
+		now := time.Now().UTC()
+		auditRuntime.status.LastFailureAt = &now
+		auditRuntime.Unlock()
+	}
+	return err
 }
 
 func (s *adminAuditService) ListRecent(limit int) ([]model.AdminAuditLog, error) {

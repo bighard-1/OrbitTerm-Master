@@ -3,6 +3,10 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"orbitterm-server/internal/config"
@@ -27,6 +31,10 @@ func main() {
 
 	// 加载环境配置（端口、数据库、JWT 等）。
 	cfg := config.Load()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("配置校验失败: %v", err)
+	}
+	log.Printf("OrbitTerm-Server 运行模式: %s", cfg.AppEnv)
 
 	// 初始化数据库连接。
 	db, err := config.NewDatabase(cfg)
@@ -47,17 +55,19 @@ func main() {
 		cfg.JWTRefreshExpireDays,
 		cfg.JWTExpireHours,
 	)
+	refreshSessionRepo := repository.NewRefreshSessionRepository(db)
+	jwtManager.SetRefreshSessionStore(refreshSessionRepo, cfg.AllowLegacyRefresh)
 
 	// 组装领域依赖。
 	userRepo := repository.NewUserRepository(db)
 	adminAuditRepo := repository.NewAdminAuditRepository(db)
 	adminAuditService := service.NewAdminAuditService(adminAuditRepo)
 	systemSettingRepo := repository.NewSystemSettingRepository(db)
-	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService)
+	securityPolicyService := service.NewSecurityPolicyService(systemSettingRepo, adminAuditService, db)
 	registrationInviteRepo := repository.NewRegistrationInviteRepository(db)
-	registrationInviteService := service.NewRegistrationInviteService(registrationInviteRepo, adminAuditService)
-	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService)
-	auditPolicyService := service.NewAuditPolicyService(systemSettingRepo, adminAuditRepo, adminAuditService)
+	registrationInviteService := service.NewRegistrationInviteService(registrationInviteRepo, adminAuditService, db)
+	recoveryPolicyService := service.NewRecoveryPolicyService(systemSettingRepo, adminAuditService, db)
+	auditPolicyService := service.NewAuditPolicyService(systemSettingRepo, adminAuditRepo, adminAuditService, db)
 	backupReadinessService := service.NewBackupReadinessService(db, cfg, adminAuditService)
 	migrationBundleService := service.NewMigrationBundleService(db, cfg, adminAuditService)
 	authService := service.NewAuthService(userRepo, jwtManager, securityPolicyService, registrationInviteService)
@@ -65,7 +75,7 @@ func main() {
 
 	configRepo := repository.NewServerConfigRepository(db)
 	assetDeletionPolicyService := service.NewAssetDeletionPolicyService(systemSettingRepo)
-	assetDeletionPolicyManager := service.NewAssetDeletionPolicyManager(systemSettingRepo, configRepo, adminAuditService)
+	assetDeletionPolicyManager := service.NewAssetDeletionPolicyManager(systemSettingRepo, configRepo, adminAuditService, db)
 	configService := service.NewConfigService(configRepo, assetDeletionPolicyService)
 	masterKeyRotationService := service.NewMasterKeyRotationService(configRepo, jwtManager)
 	configCipherMigrationService := service.NewConfigCipherMigrationService(configRepo)
@@ -74,8 +84,8 @@ func main() {
 	systemHealthService := service.NewSystemHealthService(db, cfg, startedAt)
 	healthController := controller.NewHealthController(systemHealthService)
 
-	adminAuthService := service.NewAdminAuthService(userRepo, jwtManager, adminAuditService)
-	adminUserService := service.NewAdminUserService(userRepo, adminAuditService)
+	adminAuthService := service.NewAdminAuthServiceWithPolicy(userRepo, jwtManager, adminAuditService, securityPolicyService, db)
+	adminUserService := service.NewAdminUserServiceWithPolicies(userRepo, adminAuditService, securityPolicyService, recoveryPolicyService, db)
 	adminController := controller.NewAdminController(
 		adminAuditService,
 		adminUserService,
@@ -108,11 +118,31 @@ func main() {
 		userRepo,
 		cfg.ConfigCipherV2MigrationEnabled,
 	)
-	worker.StartExpiredBanWorker(context.Background(), cfg, adminUserService)
-	worker.StartAssetTrashCleanupWorker(context.Background(), cfg, assetDeletionPolicyManager)
+	workerCtx, stopWorkers := context.WithCancel(context.Background())
+	defer stopWorkers()
+	worker.StartExpiredBanWorker(workerCtx, cfg, adminUserService)
+	worker.StartAssetTrashCleanupWorker(workerCtx, cfg, assetDeletionPolicyManager)
+	worker.StartExpiredSessionWorker(workerCtx, refreshSessionRepo)
 
 	log.Printf("OrbitTerm-Server 启动成功，监听端口: %s", cfg.ServerPort)
-	if err := engine.Run(":" + cfg.ServerPort); err != nil {
-		log.Fatalf("服务启动失败: %v", err)
+	server := &http.Server{Addr: ":" + cfg.ServerPort, Handler: engine, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 5 * time.Minute, WriteTimeout: 10 * time.Minute, IdleTimeout: 60 * time.Second}
+	serverErrors := make(chan error, 1)
+	go func() { serverErrors <- server.ListenAndServe() }()
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	select {
+	case <-stop:
+		log.Print("收到退出信号，停止接收新请求")
+	case err := <-serverErrors:
+		if err != nil && err != http.ErrServerClosed {
+			log.Fatalf("服务启动失败: %v", err)
+		}
+		return
+	}
+	stopWorkers()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("HTTP 优雅退出失败: %v", err)
 	}
 }

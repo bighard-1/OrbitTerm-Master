@@ -77,14 +77,18 @@ OrbitTerm-Server
 
 ## 四、环境变量
 
-可选环境变量（均有默认值）：
+运行模式默认 `APP_ENV=production`，启动前必须提供安全的 `DATABASE_URL` 和 `JWT_SECRET`。本地使用演示连接参数时，须显式设置 `APP_ENV=development`；开发模式不能用于线上。
+
+可选环境变量：
 
 - `SERVER_PORT`（默认 `8080`）
-- `DATABASE_URL`（默认本地 PostgreSQL 连接）
-- `JWT_SECRET`（默认演示值，生产必须替换）
+- `DATABASE_URL`（开发模式默认本地 PostgreSQL 连接；生产必须显式提供强密码）
+- `JWT_SECRET`（开发模式默认演示值；生产必须显式提供随机密钥）
 - `JWT_ISSUER`（默认 `orbitterm-server`）
 - `JWT_ACCESS_EXPIRE_MINUTES`（默认 `15`）
 - `JWT_REFRESH_EXPIRE_DAYS`（默认 `30`）
+- `ALLOW_LEGACY_REFRESH_TOKENS`（默认 `true`，五端升级并等待旧令牌过期后设为 `false`）
+- `BACKUP_LAST_SUCCESS_AT`、`RESTORE_DRILL_VERIFIED_AT`（外部备份和恢复演练成功时间，RFC3339 UTC；缺少时备份就绪为 `false`）
 - `JWT_EXPIRE_HOURS`（兼容旧配置，未设置新变量时回退）
 - `ADMIN_BOOTSTRAP_TOKEN`（无默认值；用于首次创建 `super_admin`，生产必须配置高强度随机值）
 - `DB_LOG_LEVEL`（默认 `warn`；日志参数会以占位符脱敏，生产环境仍不应长期设置为 `info`）
@@ -97,6 +101,8 @@ OrbitTerm-Server
 - `GET /api/v1/auth/registration-policy`
 - `POST /api/v1/auth/login`
 - `POST /api/v1/auth/refresh`
+- `POST /api/v1/auth/logout`（当前设备）
+- `POST /api/v1/auth/logout-all`（全部设备）
 - `GET /api/v1/auth/recovery-info`
 - `POST /api/v1/config/upload`
 - `GET /api/v1/config/pull`
@@ -136,6 +142,9 @@ OrbitTerm-Server
 
 - 封禁、重置登录密码、强制下线、软删除、过期封禁扫描必须传入 `reason`。
 - 上述高危操作还必须传入 `confirmation: "CONFIRM"`，用于后端二次确认。
+- 迁移包导出/恢复、管理员重置密码、角色调整与批量强制下线要求最近 10 分钟内重新登录；过期返回 `ADMIN_REAUTH_REQUIRED`。旧管理令牌需重新登录一次。
+
+管理员创建、重置密码与普通注册使用同一强度规则。被标记 `must_change_password` 的账号登录后只能调用 `/api/v1/auth/password`；其他受保护路由返回 `PASSWORD_CHANGE_REQUIRED`。新会话的刷新令牌一次性轮换，重放会撤销当前设备会话；旧刷新令牌在 `ALLOW_LEGACY_REFRESH_TOKENS=true` 的过渡期可用。五端客户端应在过渡期内支持 403 改密提示、401 会话退出、413 上传上限以及新退出接口。
 
 ### 注册示例
 
@@ -156,7 +165,7 @@ curl -X POST http://localhost:8080/api/v1/auth/login \
 ## 六、运行
 
 ```bash
-go run .
+APP_ENV=development go run .
 ```
 
 启动时会自动执行用户、邀请码、密文配置、同步修订、设备确认水位、审计日志与系统策略的兼容迁移。

@@ -43,7 +43,7 @@ openssl rand -base64 48
 路径：`容器 -> 编排 -> 创建编排 -> 编辑`
 
 - 编排名称建议：`orbitterm-prod`
-- 将下方 Compose 粘贴到编辑器并创建启动
+- 先在 1Panel 编排环境中设置 `POSTGRES_PASSWORD`、`DATABASE_URL`、`JWT_SECRET`；三者必须是生产随机值，数据库连接中的密码须与 `POSTGRES_PASSWORD` 一致。然后将下方 Compose 粘贴到编辑器并创建启动。
 
 ```yaml
 services:
@@ -54,7 +54,7 @@ services:
     environment:
       POSTGRES_DB: orbitterm
       POSTGRES_USER: orbitterm
-      POSTGRES_PASSWORD: "ReplaceWithStrongDBPassword"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set a strong database password}
       TZ: UTC
     volumes:
       - orbit_db_data:/var/lib/postgresql/data
@@ -72,13 +72,17 @@ services:
       orbit-db:
         condition: service_healthy
     environment:
+      APP_ENV: production
       SERVER_PORT: "8080"
-      DATABASE_URL: "host=orbit-db user=orbitterm password=ReplaceWithStrongDBPassword dbname=orbitterm port=5432 sslmode=disable TimeZone=UTC"
-      JWT_SECRET: "ReplaceWithLongRandomJwtSecret"
+      DATABASE_URL: ${DATABASE_URL:?set the full PostgreSQL connection URL}
+      JWT_SECRET: ${JWT_SECRET:?set a random JWT secret}
       JWT_ISSUER: "orbitterm-server"
       JWT_ACCESS_EXPIRE_MINUTES: "15"
       JWT_REFRESH_EXPIRE_DAYS: "30"
-      ADMIN_BOOTSTRAP_TOKEN: "ReplaceWithLongRandomAdminBootstrapToken"
+      ADMIN_BOOTSTRAP_TOKEN: ${ADMIN_BOOTSTRAP_TOKEN:-}
+      ALLOW_LEGACY_REFRESH_TOKENS: ${ALLOW_LEGACY_REFRESH_TOKENS:-true}
+      BACKUP_LAST_SUCCESS_AT: ${BACKUP_LAST_SUCCESS_AT:-}
+      RESTORE_DRILL_VERIFIED_AT: ${RESTORE_DRILL_VERIFIED_AT:-}
       ADMIN_AUTO_UNBAN_ENABLED: "true"
       ADMIN_AUTO_UNBAN_INTERVAL_MINUTES: "10"
       ADMIN_AUTO_UNBAN_BATCH_LIMIT: "100"

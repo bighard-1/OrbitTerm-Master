@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"gorm.io/gorm"
 	"orbitterm-server/internal/model"
 	"orbitterm-server/internal/repository"
 )
@@ -37,16 +38,34 @@ type RegistrationInviteConsumer interface {
 }
 
 type registrationInviteService struct {
+	db           *gorm.DB
 	repo         repository.RegistrationInviteRepository
 	auditService AdminAuditService
 	now          func() time.Time
 }
 
-func NewRegistrationInviteService(repo repository.RegistrationInviteRepository, audit AdminAuditService) RegistrationInviteService {
-	return &registrationInviteService{repo: repo, auditService: audit, now: func() time.Time { return time.Now().UTC() }}
+func NewRegistrationInviteService(repo repository.RegistrationInviteRepository, audit AdminAuditService, dbs ...*gorm.DB) RegistrationInviteService {
+	s := &registrationInviteService{repo: repo, auditService: audit, now: func() time.Time { return time.Now().UTC() }}
+	if len(dbs) > 0 {
+		s.db = dbs[0]
+	}
+	return s
 }
 
 func (s *registrationInviteService) Create(adminID uint, note string, maxUses, validDays int, reason string, meta AdminRequestMeta) (RegistrationInviteCreated, error) {
+	if s.db != nil {
+		var result RegistrationInviteCreated
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.repo = repository.NewRegistrationInviteRepository(tx)
+			copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+			var runErr error
+			result, runErr = copy.Create(adminID, note, maxUses, validDays, reason, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 || maxUses < 1 || maxUses > 1000 || validDays < 1 || validDays > 365 {
 		return RegistrationInviteCreated{}, ErrInvalidInput
 	}
@@ -68,12 +87,14 @@ func (s *registrationInviteService) Create(adminID uint, note string, maxUses, v
 	if err := s.repo.Create(&invite); err != nil {
 		return RegistrationInviteCreated{}, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID: adminID, Action: model.AuditActionRegistrationInviteCreate,
 		ResourceType: "registration_invite", ResourceID: invite.CodePrefix,
 		IPAddress: meta.IPAddress, UserAgent: meta.UserAgent,
 		Reason: strings.TrimSpace(reason),
-	})
+	}); err != nil {
+		return RegistrationInviteCreated{}, err
+	}
 	return RegistrationInviteCreated{Invite: invite, Code: code}, nil
 }
 
@@ -82,6 +103,19 @@ func (s *registrationInviteService) List(limit, offset int) ([]model.Registratio
 }
 
 func (s *registrationInviteService) Revoke(adminID, inviteID uint, reason string, meta AdminRequestMeta) (*model.RegistrationInvite, error) {
+	if s.db != nil {
+		var result *model.RegistrationInvite
+		err := s.db.Transaction(func(tx *gorm.DB) error {
+			copy := *s
+			copy.db = nil
+			copy.repo = repository.NewRegistrationInviteRepository(tx)
+			copy.auditService = NewAdminAuditService(repository.NewAdminAuditRepository(tx))
+			var runErr error
+			result, runErr = copy.Revoke(adminID, inviteID, reason, meta)
+			return runErr
+		})
+		return result, err
+	}
 	if adminID == 0 || inviteID == 0 || len(strings.TrimSpace(reason)) < 2 {
 		return nil, ErrInvalidInput
 	}
@@ -89,11 +123,13 @@ func (s *registrationInviteService) Revoke(adminID, inviteID uint, reason string
 	if err != nil {
 		return nil, err
 	}
-	_ = s.auditService.Record(AdminAuditEntry{
+	if err := s.auditService.Record(AdminAuditEntry{
 		AdminUserID: adminID, Action: model.AuditActionRegistrationInviteRevoke,
 		ResourceType: "registration_invite", ResourceID: invite.CodePrefix,
 		IPAddress: meta.IPAddress, UserAgent: meta.UserAgent, Reason: strings.TrimSpace(reason),
-	})
+	}); err != nil {
+		return nil, err
+	}
 	return invite, nil
 }
 

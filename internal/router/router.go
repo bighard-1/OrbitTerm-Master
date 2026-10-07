@@ -37,15 +37,17 @@ func Register(
 			auth.GET("/recovery-info", middleware.IPRateLimit(60, time.Minute), authController.RecoveryInfo)
 			auth.GET("/registration-policy", middleware.IPRateLimit(60, time.Minute), authController.RegistrationPolicy)
 			auth.POST("/password", middleware.JWTAuthMiddleware(jwtManager, userRepo), middleware.IPRateLimit(10, time.Hour), authController.ChangePassword)
+			auth.POST("/logout", middleware.JWTAuthMiddleware(jwtManager, userRepo), authController.LogoutCurrent)
+			auth.POST("/logout-all", middleware.JWTAuthMiddleware(jwtManager, userRepo), authController.LogoutAll)
 		}
 
 		configGroup := v1.Group("/config")
 		configGroup.Use(middleware.JWTAuthMiddleware(jwtManager, userRepo))
 		{
-			configGroup.POST("/upload", configController.Upload)
-			configGroup.POST("/master-key/rotate", middleware.IPRateLimit(5, time.Hour), configController.RotateMasterKey)
+			configGroup.POST("/upload", middleware.LimitBody(16<<20), configController.Upload)
+			configGroup.POST("/master-key/rotate", middleware.LimitBody(64<<20), middleware.IPRateLimit(5, time.Hour), configController.RotateMasterKey)
 			if configCipherV2MigrationEnabled {
-				configGroup.POST("/crypto/migrate-v2", middleware.IPRateLimit(5, time.Hour), configController.MigrateConfigCryptoV2)
+				configGroup.POST("/crypto/migrate-v2", middleware.LimitBody(64<<20), middleware.IPRateLimit(5, time.Hour), configController.MigrateConfigCryptoV2)
 			}
 			configGroup.GET("/pull", configController.Pull)
 			configGroup.GET("/trash", configController.Trash)
@@ -122,11 +124,13 @@ func Register(
 			adminGroup.POST(
 				"/system/migration-bundle/export",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				middleware.RequireRecentLogin(10*time.Minute),
 				adminController.ExportMigrationBundle,
 			)
 			adminGroup.POST(
 				"/system/migration-bundle/restore",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				middleware.RequireRecentLogin(10*time.Minute),
 				adminController.RestoreMigrationBundle,
 			)
 			adminGroup.GET("/users", adminController.ListUsers)
@@ -163,12 +167,14 @@ func Register(
 			adminGroup.POST(
 				"/users/force-logout-regular",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				middleware.RequireRecentLogin(10*time.Minute),
 				adminController.ForceLogoutRegularUsers,
 			)
 			adminGroup.GET("/users/:id", adminController.GetUser)
 			adminGroup.POST(
 				"/users/:id/role",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin),
+				middleware.RequireRecentLogin(10*time.Minute),
 				adminController.UpdateUserRole,
 			)
 			adminGroup.POST(
@@ -184,6 +190,7 @@ func Register(
 			adminGroup.POST(
 				"/users/:id/reset-password",
 				middleware.RequireAdminRole(model.UserRoleSuperAdmin, model.UserRoleAdmin),
+				middleware.RequireRecentLogin(10*time.Minute),
 				adminController.ResetPassword,
 			)
 			adminGroup.POST(
