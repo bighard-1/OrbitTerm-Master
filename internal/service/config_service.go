@@ -100,7 +100,7 @@ func normalizeConfigUploadInput(
 	input := configUploadInput{
 		userID:              userID,
 		configID:            configID,
-		assetID:             strings.TrimSpace(assetID),
+		assetID:             strings.ToLower(strings.TrimSpace(assetID)),
 		identityFingerprint: strings.ToLower(strings.TrimSpace(identityFingerprint)),
 		encryptedBlob:       encryptedBlob,
 		vectorClock:         vectorClock,
@@ -165,7 +165,7 @@ func (s *configService) updateExistingUpload(existing *model.ServerConfig, input
 	if existing.IsDeleted() {
 		return nil, ErrConfigInvalidState
 	}
-	if input.assetID != "" && existing.AssetID != "" && existing.AssetID != input.assetID {
+	if input.assetID != "" && existing.AssetID != "" && !strings.EqualFold(existing.AssetID, input.assetID) {
 		return nil, ErrConfigInvalidInput
 	}
 	if existing.AssetID == "" && input.assetID != "" {

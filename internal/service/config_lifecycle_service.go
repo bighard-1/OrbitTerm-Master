@@ -24,6 +24,7 @@ func (s *configService) DeleteAsset(userID uint, input AssetMutationInput) (*mod
 	if userID == 0 || !validAssetMutationInput(input) {
 		return nil, ErrConfigInvalidInput
 	}
+	input.AssetID = strings.ToLower(strings.TrimSpace(input.AssetID))
 	policy, err := s.policy.GetAssetDeletionPolicy()
 	if err != nil {
 		return nil, err
@@ -94,6 +95,7 @@ func (s *configService) RestoreAsset(userID uint, input AssetMutationInput) (*mo
 	if userID == 0 || !validAssetMutationInput(input) {
 		return nil, ErrConfigInvalidInput
 	}
+	input.AssetID = strings.ToLower(strings.TrimSpace(input.AssetID))
 	config, err := s.configRepo.MutateByAssetID(userID, input.AssetID, func(cfg *model.ServerConfig) (bool, error) {
 		if cfg.LastOperationID == input.OperationID && cfg.State == model.ServerConfigStateActive {
 			return false, nil
@@ -133,6 +135,7 @@ func (s *configService) PurgeAsset(userID uint, input AssetMutationInput) (*mode
 	if userID == 0 || !validAssetMutationInput(input) {
 		return nil, ErrConfigInvalidInput
 	}
+	input.AssetID = strings.ToLower(strings.TrimSpace(input.AssetID))
 	config, err := s.configRepo.MutateByAssetID(userID, input.AssetID, func(cfg *model.ServerConfig) (bool, error) {
 		if cfg.LastOperationID == input.OperationID && cfg.State == model.ServerConfigStatePurged {
 			return false, nil
