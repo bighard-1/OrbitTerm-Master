@@ -87,7 +87,7 @@ func MigrateDatabase(db *gorm.DB) error {
 func enforceCanonicalAssetIDUniqueness(db *gorm.DB) error {
 	return db.Transaction(func(tx *gorm.DB) error {
 		// Serialize the audit, backfill and index creation against concurrent
-		// uploads from an older server instance during a rolling deployment.
+		// writes. Deployment must drain older case-sensitive instances first.
 		if err := tx.Exec("LOCK TABLE server_configs IN SHARE ROW EXCLUSIVE MODE").Error; err != nil {
 			return fmt.Errorf("lock server config identities: %w", err)
 		}
