@@ -37,6 +37,19 @@ HAVING COUNT(*) > 1;
 
 结果必须为空。迁移会在表锁下再次审计、将已有非空 AssetID 规范化为小写，
 并建立大小写无关的唯一索引；密文、资产状态和同步修订号不因大小写迁移而改变。
+可用仓库内的 [`sql/asset_id_canonical_preflight.sql`](sql/asset_id_canonical_preflight.sql)
+在目标 PostgreSQL 中执行同一规则的只读预检。输出仅包含冲突组数、受影响行数和
+需要规范化的行数；`canonical_collision_groups` 必须为 `0`。预检不能代替备份，
+也不能代替迁移时持锁的二次审计。执行前须核对连接确实指向目标数据库，且备份的
+校验和及 `pg_restore --list` 均已通过；不要把数据库口令写入终端命令或回执。
+若实际容器名、库名和用户确为部署指南中的示例值，可在持有该 SQL 文件的主机上执行：
+
+```bash
+docker exec -i orbit-db psql -X -v ON_ERROR_STOP=1 -U orbitterm -d orbitterm \
+  < docs/sql/asset_id_canonical_preflight.sql
+```
+
+容器、数据库或用户不同则先核对并替换；命令必须返回成功，且冲突组数为零。
 若发现重复组，迁移安全停止，不自动删除或合并任何密文记录。应保持旧版本服务，
 在维护窗口对照受控客户端的活动列表、最近删除与向量钟审查冲突，完成经确认的
 恢复方案后重跑审计。不得仅按数据库 ID 或更新时间选择胜者，否则可能使已删除
