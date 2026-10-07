@@ -151,7 +151,7 @@ func TestAdminAuthServiceLoginReturnsTokenAndWritesAudit(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Login failed: %v", err)
 	}
-	if pair.AccessToken == "" || pair.RefreshToken == "" {
+	if pair.AccessToken == "" || pair.RefreshToken == "" || pair.MustChangePassword {
 		t.Fatalf("expected token pair, got %+v", pair)
 	}
 	updated, _ := userRepo.FindByID(1)
@@ -160,6 +160,23 @@ func TestAdminAuthServiceLoginReturnsTokenAndWritesAudit(t *testing.T) {
 	}
 	if len(audit.entries) != 1 || audit.entries[0].Action != model.AuditActionAdminLogin {
 		t.Fatalf("expected login audit, got %+v", audit.entries)
+	}
+}
+
+func TestAdminAuthServiceLoginReportsPasswordChangeRequirement(t *testing.T) {
+	password := "AdminStrongPass123!"
+	hash, err := utils.HashPasswordArgon2ID(password)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeUserRepo(&model.User{
+		ID: 1, Username: "admin@example.com", PasswordHash: hash,
+		Role: model.UserRoleAdmin, Status: model.UserStatusNormal, MustChangePassword: true,
+	})
+	svc := NewAdminAuthService(repo, newTestJWTManager(), &fakeAdminAuditService{})
+	pair, err := svc.Login("admin@example.com", password, AdminRequestMeta{})
+	if err != nil || !pair.MustChangePassword {
+		t.Fatalf("admin login must report required password change: pair=%+v err=%v", pair, err)
 	}
 }
 

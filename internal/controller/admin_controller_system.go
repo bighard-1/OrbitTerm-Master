@@ -136,6 +136,7 @@ func (c *AdminController) Login(ctx *gin.Context) {
 		"type":                       "Bearer",
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+		"must_change_password":       pair.MustChangePassword,
 	})
 }
 

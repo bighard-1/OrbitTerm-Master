@@ -47,6 +47,7 @@ type TokenPair struct {
 	RefreshToken            string `json:"refresh_token"`
 	AccessExpiresInSeconds  int64  `json:"expires_in_seconds"`
 	RefreshExpiresInSeconds int64  `json:"refresh_expires_in_seconds"`
+	MustChangePassword      bool   `json:"must_change_password"`
 }
 
 func NewJWTManager(secret, issuer string, accessExpireMinutes, refreshExpireDays, legacyExpireHours int) *JWTManager {

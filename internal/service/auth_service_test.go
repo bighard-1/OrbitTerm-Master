@@ -58,6 +58,40 @@ func TestAuthServiceChangePasswordRotatesTokensAndRejectsOldCredential(t *testin
 	}
 }
 
+func TestAuthServiceTokenPairsExposePasswordChangeRequirement(t *testing.T) {
+	oldPassword := "CurrentStrongPass123!"
+	hash, err := utils.HashPasswordArgon2ID(oldPassword)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := newFakeUserRepo(&model.User{
+		ID: 1, Username: "reset@example.com", PasswordHash: hash,
+		Role: model.UserRoleUser, Status: model.UserStatusNormal, MustChangePassword: true,
+	})
+	svc := NewAuthService(repo, newTestJWTManager(), nil)
+
+	login, err := svc.Login("reset@example.com", oldPassword)
+	if err != nil || !login.MustChangePassword {
+		t.Fatalf("reset login must report required password change: pair=%+v err=%v", login, err)
+	}
+	refreshed, err := svc.Refresh(login.RefreshToken)
+	if err != nil || !refreshed.MustChangePassword {
+		t.Fatalf("refresh must retain required password change: pair=%+v err=%v", refreshed, err)
+	}
+	changed, err := svc.ChangePassword(1, oldPassword, "ReplacementStrongPass456!")
+	if err != nil || changed.MustChangePassword {
+		t.Fatalf("successful password change must clear requirement: pair=%+v err=%v", changed, err)
+	}
+	regular, err := svc.Login("reset@example.com", "ReplacementStrongPass456!")
+	if err != nil || regular.MustChangePassword {
+		t.Fatalf("subsequent login must report no requirement: pair=%+v err=%v", regular, err)
+	}
+	regularRefresh, err := svc.Refresh(regular.RefreshToken)
+	if err != nil || regularRefresh.MustChangePassword {
+		t.Fatalf("subsequent refresh must report no requirement: pair=%+v err=%v", regularRefresh, err)
+	}
+}
+
 func TestAuthServiceChangePasswordRequiresCurrentPasswordAndPolicy(t *testing.T) {
 	policy := model.DefaultSecurityPolicy()
 	policy.InvitationRequired = false

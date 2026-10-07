@@ -223,6 +223,7 @@ func (s *adminAuthService) Login(username, password string, meta AdminRequestMet
 	if err != nil {
 		return nil, err
 	}
+	pair.MustChangePassword = user.MustChangePassword
 
 	_ = s.auditService.Record(AdminAuditEntry{
 		AdminUserID:  user.ID,

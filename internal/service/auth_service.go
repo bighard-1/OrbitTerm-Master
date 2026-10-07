@@ -160,6 +160,7 @@ func (s *authService) Login(username, password string) (*utils.TokenPair, error)
 	if err != nil {
 		return nil, err
 	}
+	pair.MustChangePassword = user.MustChangePassword
 	return pair, nil
 }
 
@@ -223,6 +224,7 @@ func (s *authService) Refresh(refreshToken string) (*utils.TokenPair, error) {
 		}
 		return nil, err
 	}
+	pair.MustChangePassword = user.MustChangePassword
 	return pair, nil
 }
 
@@ -275,6 +277,7 @@ func (s *authService) ChangePassword(userID uint, currentPassword, newPassword s
 	if err != nil {
 		return nil, err
 	}
+	pair.MustChangePassword = false
 	if guarded, ok := s.userRepo.(interface {
 		UpdatePasswordIfCurrent(uint, string, int64, string) (bool, error)
 	}); ok {

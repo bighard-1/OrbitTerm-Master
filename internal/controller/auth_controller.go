@@ -148,7 +148,7 @@ func (c *AuthController) RegistrationPolicy(ctx *gin.Context) {
 
 // Login godoc
 // @Summary 用户登录
-// @Description 校验用户凭证并返回 JWT。
+// @Description 校验用户凭证并返回 JWT；data.must_change_password 表示是否必须立即修改登录密码。
 // @Tags auth
 // @Accept json
 // @Produce json
@@ -188,12 +188,13 @@ func (c *AuthController) Login(ctx *gin.Context) {
 		"type":                       "Bearer",
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+		"must_change_password":       pair.MustChangePassword,
 	})
 }
 
 // Refresh godoc
 // @Summary 刷新访问令牌
-// @Description 使用 refresh token 申请新的 access token 与 refresh token（轮换）。
+// @Description 使用 refresh token 申请新的 access token 与 refresh token（轮换）；data.must_change_password 保留当前账号的改密要求。
 // @Tags auth
 // @Accept json
 // @Produce json
@@ -234,11 +235,13 @@ func (c *AuthController) Refresh(ctx *gin.Context) {
 		"type":                       "Bearer",
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+		"must_change_password":       pair.MustChangePassword,
 	})
 }
 
 // ChangePassword verifies the current login password and invalidates every
 // existing token before returning a replacement pair for this device.
+// Its successful response includes must_change_password=false.
 func (c *AuthController) ChangePassword(ctx *gin.Context) {
 	userID, ok := extractUserID(ctx)
 	if !ok {
@@ -282,6 +285,7 @@ func (c *AuthController) ChangePassword(ctx *gin.Context) {
 		"type":                       "Bearer",
 		"expires_in_seconds":         pair.AccessExpiresInSeconds,
 		"refresh_expires_in_seconds": pair.RefreshExpiresInSeconds,
+		"must_change_password":       pair.MustChangePassword,
 	})
 }
 

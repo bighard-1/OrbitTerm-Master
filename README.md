@@ -144,7 +144,7 @@ OrbitTerm-Server
 - 上述高危操作还必须传入 `confirmation: "CONFIRM"`，用于后端二次确认。
 - 迁移包导出/恢复、管理员重置密码、角色调整与批量强制下线要求最近 10 分钟内重新登录；过期返回 `ADMIN_REAUTH_REQUIRED`。旧管理令牌需重新登录一次。
 
-管理员创建、重置密码与普通注册使用同一强度规则。被标记 `must_change_password` 的账号登录后只能调用 `/api/v1/auth/password`；其他受保护路由返回 `PASSWORD_CHANGE_REQUIRED`。新会话的刷新令牌一次性轮换，重放会撤销当前设备会话；旧刷新令牌在 `ALLOW_LEGACY_REFRESH_TOKENS=true` 的过渡期可用。五端客户端应在过渡期内支持 403 改密提示、401 会话退出、413 上传上限以及新退出接口。
+管理员创建、重置密码与普通注册使用同一强度规则。`POST /api/v1/auth/login`、`POST /api/v1/auth/refresh` 和 `POST /api/v1/admin/auth/login` 的成功响应在 `data` 中始终包含布尔字段 `must_change_password`；`POST /api/v1/auth/password` 成功后返回 `false`。客户端可在登录响应为 `true` 时直接进入改密流程。被标记的账号仍只能调用 `/api/v1/auth/password`；其他受保护路由返回 HTTP 403、`PASSWORD_CHANGE_REQUIRED`，以服务端强制校验为准。新会话的刷新令牌一次性轮换，重放会撤销当前设备会话；旧刷新令牌在 `ALLOW_LEGACY_REFRESH_TOKENS=true` 的过渡期可用。五端客户端应在过渡期内支持 403 改密提示、401 会话退出、413 上传上限以及新退出接口。
 
 ### 注册示例
 
