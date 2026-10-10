@@ -78,7 +78,7 @@ curl -s -X POST "$ORBIT_API/api/v1/admin/auth/login" \
 export ADMIN_TOKEN="粘贴返回的 access_token"
 ```
 
-登录成功响应的 `data.must_change_password` 始终是布尔值。若为 `true`，请立即调用 `POST /api/v1/auth/password` 修改登录密码；改密成功响应中的该字段为 `false`。普通用户的 `POST /api/v1/auth/login` 和 `POST /api/v1/auth/refresh` 成功响应也有同名字段。未完成改密时，其他受保护接口仍返回 HTTP 403、`code=PASSWORD_CHANGE_REQUIRED`，客户端不能仅依赖响应字段绕过服务端限制。
+登录成功响应的 `data.must_change_password` 始终是布尔值。若为 `true`，请立即调用 `POST /api/v1/auth/password` 修改登录密码；改密成功响应中的该字段为 `false`。普通用户的 `POST /api/v1/auth/login` 和 `POST /api/v1/auth/refresh` 成功响应也有同名字段。未完成改密时仍可调用 `POST /api/v1/auth/logout` 或 `POST /api/v1/auth/logout-all`；其他受保护接口返回 HTTP 403、`code=PASSWORD_CHANGE_REQUIRED`，客户端不能仅依赖响应字段绕过服务端限制。
 
 后续管理端接口统一携带：
 

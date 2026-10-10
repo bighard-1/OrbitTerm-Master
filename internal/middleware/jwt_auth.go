@@ -107,10 +107,14 @@ func JWTAuthMiddleware(jwtManager *utils.JWTManager, userRepo repository.UserRep
 			ctx.Abort()
 			return
 		}
-		if user.MustChangePassword && ctx.FullPath() != "/api/v1/auth/password" {
-			ctx.JSON(http.StatusForbidden, gin.H{"success": false, "code": "PASSWORD_CHANGE_REQUIRED", "error": "必须先修改登录密码", "password_change_path": "/api/v1/auth/password"})
-			ctx.Abort()
-			return
+		if user.MustChangePassword {
+			switch ctx.FullPath() {
+			case "/api/v1/auth/password", "/api/v1/auth/logout", "/api/v1/auth/logout-all":
+			default:
+				ctx.JSON(http.StatusForbidden, gin.H{"success": false, "code": "PASSWORD_CHANGE_REQUIRED", "error": "必须先修改登录密码", "password_change_path": "/api/v1/auth/password"})
+				ctx.Abort()
+				return
+			}
 		}
 
 		ctx.Set(ContextUserIDKey, claims.UserID)

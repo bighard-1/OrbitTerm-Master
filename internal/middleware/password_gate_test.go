@@ -19,7 +19,7 @@ type passwordGateRepo struct {
 
 func (r passwordGateRepo) FindByID(id uint) (*model.User, error) { return r.user, nil }
 
-func TestMustChangePasswordAllowsOnlyPasswordRoute(t *testing.T) {
+func TestMustChangePasswordAllowsPasswordAndLogoutRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	user := &model.User{ID: 1, Username: "a@example.com", MustChangePassword: true}
 	jwt := utils.NewJWTManager("strong-test-secret-for-password-gate", "test", 15, 30, 24)
@@ -29,8 +29,10 @@ func TestMustChangePasswordAllowsOnlyPasswordRoute(t *testing.T) {
 	}
 	r := gin.New()
 	r.POST("/api/v1/auth/password", JWTAuthMiddleware(jwt, passwordGateRepo{user: user}), func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/api/v1/auth/logout", JWTAuthMiddleware(jwt, passwordGateRepo{user: user}), func(c *gin.Context) { c.Status(http.StatusOK) })
+	r.POST("/api/v1/auth/logout-all", JWTAuthMiddleware(jwt, passwordGateRepo{user: user}), func(c *gin.Context) { c.Status(http.StatusOK) })
 	r.POST("/api/v1/config/upload", JWTAuthMiddleware(jwt, passwordGateRepo{user: user}), func(c *gin.Context) { c.Status(http.StatusOK) })
-	for path, want := range map[string]int{"/api/v1/auth/password": 200, "/api/v1/config/upload": 403} {
+	for path, want := range map[string]int{"/api/v1/auth/password": 200, "/api/v1/auth/logout": 200, "/api/v1/auth/logout-all": 200, "/api/v1/config/upload": 403} {
 		req := httptest.NewRequest(http.MethodPost, path, nil)
 		req.Header.Set("Authorization", "Bearer "+pair.AccessToken)
 		res := httptest.NewRecorder()

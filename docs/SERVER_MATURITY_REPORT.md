@@ -15,7 +15,7 @@
 
 - 发现：管理员引导、建号和重置使用比注册更弱的密码门槛；`MustChangePassword` 只是字段；恢复开关没有控制重置。
 - 修改：`internal/service/admin_auth_service.go`、`admin_user_service.go`、`internal/middleware/jwt_auth.go`、相关控制器及测试。
-- 取舍：统一使用当前注册密码强度；恢复策略关闭时拒绝管理端重置。已标记账号登录后仅能访问 `/api/v1/auth/password`，其他受保护路由返回 403、`PASSWORD_CHANGE_REQUIRED`。高风险管理员用户变更与审计同事务提交，审计失败回滚变更。
+- 取舍：统一使用当前注册密码强度；恢复策略关闭时拒绝管理端重置。已标记账号登录后可访问 `/api/v1/auth/password`、`/api/v1/auth/logout` 和 `/api/v1/auth/logout-all`，其他受保护路由返回 403、`PASSWORD_CHANGE_REQUIRED`。高风险管理员用户变更与审计同事务提交，审计失败回滚变更。
 - 验证：密码规则单测、路由门禁测试和 PostgreSQL 审计故障回滚测试通过。
 - 剩余风险：五端需处理 403 改密路径；旧管理台令牌须重新登录才能执行受保护管理操作。
 - 下一步：五端联调首次登录、重置后登录、改密后令牌更新；检查用户文案。
