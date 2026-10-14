@@ -50,11 +50,11 @@ button { user-select: none; }
   gap: 24px;
 }
 .brand { display: flex; align-items: center; gap: 12px; }
-.logo {
+.brand-logo {
   width: 44px; height: 44px; border-radius: 14px;
-  display: grid; place-items: center;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  color: #001018; font-weight: 900;
+  object-fit: cover;
+  clip-path: inset(0 round 14px);
+  border: 1px solid rgba(122, 187, 255, 0.34);
   box-shadow: 0 0 28px rgba(0,229,255,0.26);
 }
 .brand span { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }

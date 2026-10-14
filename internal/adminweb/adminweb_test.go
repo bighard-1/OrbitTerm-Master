@@ -10,7 +10,7 @@ import (
 )
 
 func TestEmbeddedAdminConsoleAssets(t *testing.T) {
-	for _, path := range []string{"static/index.html", "static/styles.css", "static/app.js"} {
+	for _, path := range []string{"static/index.html", "static/styles.css", "static/app.js", "static/orbitterm-logo.png"} {
 		data, err := content.ReadFile(path)
 		if err != nil {
 			t.Fatalf("expected embedded asset %s: %v", path, err)
